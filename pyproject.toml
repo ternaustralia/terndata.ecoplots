@@ -1,0 +1,104 @@
+[project]
+name = "terndata.ecoplots"
+description = "TERN ecoplots data access library"
+readme = "README.md"
+license = "Apache-2.0"
+maintainers = [{name = "Yong Liaw", email = "y.liaw@uq.edu.au"}]
+authors = [{name = "Terrestrial Ecosystem Research Network (TERN)", email = "esupprt@tern.org.au"}]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules"
+]
+requires-python = ">=3.10"
+dynamic = ["version", "dependencies", "optional-dependencies"]
+
+[project.urls]
+Home = "https://github.com/ternaustralia/terndata.ecoplots"
+Documentation = "https://terndata-ecoplots.readthedocs.io"
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+# optional-dependencies.test = { file = ["requirements-test.txt"] }
+# optional-dependencies.docs = { file = ["requirements-docs.txt"] }
+# optional-dependencies.flake8 = { file = ["requirements-flake8.txt"] }
+
+[build-system]
+requires = ["setuptools", "setuptools_scm[toml]"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/terndata/ecoplots/version.py"
+fallback_version = "0.0.0.dev0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # treat all warnings as errors
+    "error",
+    # ignore:<regexp>
+    # e.g.:
+    # ignore:jsonschema.RefResolver is deprecated as of v4.18.0
+]
+junit_family = "xunit2"
+pythonpath = [
+    ".", "src"
+]
+
+[tool.mypy]
+disable_error_code = ["import-untyped"]
+
+[tool.coverage.run]
+source_pkgs = ["terndata.ecoplots"]
+omit = ["tests/"]
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 100
+per-file-ignores = [
+    # __init__ exports names
+    'src/**/__init__.py:F401',
+    'src/*/version.py:BLK,F401,PEA001',
+    'src/*/flux_api.py: DAR401',
+    # DAR101: in tests we usually have fixtures as parameters should we require
+    #         documentation for these ?
+    # D103: ignore missing module doc strings in tests
+    # S101: we do allow assert in test code
+    'tests/**:S101,DAR101,DAR301,D103',
+]
+# darglint
+strictness = "short"  # allow one line doc strings
+docstring_style = "google"  # docstring style (affects parser)
+# flake8-docistrings -> pydocstlye
+docstring_convention= "google"
+extend-select = [
+    # bugbear
+    "B",
+    # bugbear opinions
+    "B9",
+    "B950",  # lenient line length
+    # implicit str concat
+    "ISC",
+]
+extend-ignore = [
+    "E203", # handled by black
+    "E501", # ignore strict line length ... handled by B950
+    "B907", # not really useful
+    "D100", # docstring in package (__init__.py )
+    "D104", # docstrinp in module (*.py)
+    "D202", # no blank lines after doc string
+    "DAR201", # no return in docstring
+    "A003", # allow builtins (esp. 'id' as class attribute)
+]

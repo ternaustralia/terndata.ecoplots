@@ -1,0 +1,9 @@
+# See https://docs.xarray.dev/en/stable/getting-started-guide/installing.html
+typing-extensions
+numpy
+pandas
+geopandas
+requests
+# Required for export utilities
+python-dateutil
+pytz
