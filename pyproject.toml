@@ -3,7 +3,7 @@ name = "terndata.ecoplots"
 description = "TERN ecoplots data access library"
 readme = "README.md"
 license = "Apache-2.0"
-maintainers = [{name = "Yong Liaw", email = "y.liaw@uq.edu.au"}]
+maintainers = [{name = "Avinash Chandra", email = "avinash.chandra@uq.edu.au"}]
 authors = [{name = "Terrestrial Ecosystem Research Network (TERN)", email = "esupprt@tern.org.au"}]
 classifiers = [
     "Development Status :: 5 - Production/Stable",

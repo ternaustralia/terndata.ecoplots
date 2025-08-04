@@ -1,8 +1,13 @@
 import asyncio
 import orjson
+import pandas as pd
+import geopandas as gpd
+
 from typing import Optional, Dict
 from terndata.ecoplots.api_calls import _EcoPlotsAPI
 from terndata.ecoplots.config import API_BASE_URL
+from terndata.ecoplots.utils import run_sync
+
 
 class EcoPlots:
     """
@@ -44,17 +49,20 @@ class EcoPlots:
         return cls(filterset=filters)
     
 
-    def get_summary(self):
+    def get_summary(self) -> gpd.GeoDataFrame:
         query = {
             "page_number": 1,
             "page_size": 10,
             "query": self.filters
         }
 
-        return asyncio.run(self._ecoplots_api.fetch_data(query=query))
+        geojson_data = run_sync(self._ecoplots_api.fetch_data(query=query))
+
+        return gpd.GeoDataFrame.from_features(geojson_data["features"])
+
     
 
-    async def get_summary_async(self):
+    async def get_summary_async(self) -> gpd.GeoDataFrame:
         """
         Asynchronous method to get a summary of the EcoPlots data.
         """
@@ -63,25 +71,31 @@ class EcoPlots:
             "page_size": 10,
             "query": self.filters
         }
-        return await self._ecoplots_api.fetch_data(query=query)
+        data = await self._ecoplots_api.fetch_data(query=query)
+        gdf = await asyncio.to_thread(gpd.GeoDataFrame.from_features, data["features"])
+        return gdf
     
 
-    def get_datasources(self):
+    def get_datasources(self) -> pd.DataFrame:
         query = {
             "query": self.filters
         }
 
-        return asyncio.run(self._ecoplots_api.discover("dataset", query=query))
+        data = run_sync(self._ecoplots_api.discover("dataset", query=query))
+        return pd.DataFrame(data)
     
     
-    async def get_datasources_async(self):
+    async def get_datasources_async(self) -> pd.DataFrame:
         """
         Asynchronous method to get the data sources from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return await self._ecoplots_api.discover("dataset", query=query)
+        data =  await self._ecoplots_api.discover("dataset", query=query)
+        # Convert to DataFrame in a thread-safe manner, keeping method non-blocking
+        df = await asyncio.to_thread(pd.DataFrame, data)
+        return df
     
 
     def get_datasources_attributes(self):
@@ -95,22 +109,25 @@ class EcoPlots:
         pass  # TODO
 
 
-    def get_sites(self):
+    def get_sites(self) -> pd.DataFrame:
         query = {
             "query": self.filters
         }
 
-        return asyncio.run(self._ecoplots_api.discover("site_id", query=query))
+        data = run_sync(self._ecoplots_api.discover("site_id", query=query))
+        return pd.DataFrame(data)
     
 
-    async def get_sites_async(self):
+    async def get_sites_async(self) -> pd.DataFrame:
         """
         Asynchronous method to get the sites from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return await self._ecoplots_api.discover("site_id", query=query)
+        data = await self._ecoplots_api.discover("site_id", query=query)
+        df = await asyncio.to_thread(pd.DataFrame, data)
+        return df
     
     def get_sites_attributes(self):
         pass  # TODO
@@ -123,98 +140,125 @@ class EcoPlots:
         pass  # TODO
 
 
-    def get_region_types(self):
+    def get_region_types(self) -> pd.DataFrame:
         """
         Get the available region types from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return asyncio.run(self._ecoplots_api.discover("region_type", query=query))
+        data = run_sync(self._ecoplots_api.discover("region_type", query=query))
+        return pd.DataFrame(data)
     
 
-    async def get_region_types_async(self):
+    async def get_region_types_async(self) -> pd.DataFrame:
         """
         Asynchronous method to get the available region types from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return await self._ecoplots_api.discover("region_type", query=query)
+        data = await self._ecoplots_api.discover("region_type", query=query)
+        df = await asyncio.to_thread(pd.DataFrame, data)
+        return df
     
 
-    def get_regions(self, region_type: str):
+    def get_regions(self, region_type: str) -> pd.DataFrame:
         """
         Get the available regions for a specific region type from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return asyncio.run(self._ecoplots_api.discover("region", region_type=region_type, query=query))
+        data = run_sync(self._ecoplots_api.discover("region", region_type=region_type, query=query))
+        return pd.DataFrame(data)
     
 
-    async def get_regions_async(self, region_type: str):
+    async def get_regions_async(self, region_type: str) -> pd.DataFrame:
         """
         Asynchronous method to get the available regions for a specific region type from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return await self._ecoplots_api.discover("region", region_type=region_type, query=query)
+        data = await self._ecoplots_api.discover("region", region_type=region_type, query=query)
+        df = await asyncio.to_thread(pd.DataFrame, data)
+        return df
 
 
-    def get_feature_types(self):
+    def get_feature_types(self) -> pd.DataFrame:
         query = {
             "query": self.filters
         }
 
-        return asyncio.run(self._ecoplots_api.discover("feature_type", query=query))
+        data = run_sync(self._ecoplots_api.discover("feature_type", query=query))
+        return pd.DataFrame(data)
     
 
-    async def get_feature_types_async(self):
+    async def get_feature_types_async(self) -> pd.DataFrame:
         """
         Asynchronous method to get the feature types from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return await self._ecoplots_api.discover("feature_type", query=query)
+        data = await self._ecoplots_api.discover("feature_type", query=query)
+        df = await asyncio.to_thread(pd.DataFrame, data)
+        return df
     
 
-    def get_observed_properties(self):
+    def get_observed_properties(self) -> pd.DataFrame:
         query = {
             "query": self.filters
         }
 
-        return asyncio.run(self._ecoplots_api.discover("observed_property", query=query))
+        data = run_sync(self._ecoplots_api.discover("observed_property", query=query))
+        return pd.DataFrame(data)
     
 
-    async def get_observed_properties_async(self):
+    async def get_observed_properties_async(self) -> pd.DataFrame:
         """
         Asynchronous method to get the observed properties from the EcoPlots API.
         """
         query = {
             "query": self.filters
         }
-        return await self._ecoplots_api.discover("observed_property", query=query)
+        data = await self._ecoplots_api.discover("observed_property", query=query)
+        df = await asyncio.to_thread(pd.DataFrame, data)
+        return df
     
 
-    def get_data(self):
+    def get_data(self, allow_full_download: bool = False) -> gpd.GeoDataFrame:
         """
         Get data from the EcoPlots API based on the current filters.
         """
         query = {
             "query": self.filters
         }
-        return asyncio.run(self._ecoplots_api.fetch_data(query=query))
+        if not self.filters and not allow_full_download:
+            raise RuntimeError(
+                "No filters specified! Downloading full EcoPlots dataset "
+                "can crash your environment. Proceed with caution!\n"
+                "If you are sure, call get_data(allow_full_download=True)."
+            )
+        data = run_sync(self._ecoplots_api.fetch_data(query=query))
+        return gpd.GeoDataFrame.from_features(data["features"])
     
 
-    async def get_data_async(self):
+    async def get_data_async(self, allow_full_download: bool = False) -> gpd.GeoDataFrame:
         """
         Asynchronous method to get data from the EcoPlots API based on the current filters.
         """
         query = {
             "query": self.filters
         }
-        return await self._ecoplots_api.fetch_data(query=query)
+        if not self.filters and not allow_full_download:
+            raise RuntimeError(
+                "No filters specified! Downloading full EcoPlots dataset "
+                "can crash your environment. Proceed with caution!\n"
+                "If you are sure, call get_data(allow_full_download=True)."
+            )
+        data = await self._ecoplots_api.fetch_data(query=query)
+        gdf = await asyncio.to_thread(gpd.GeoDataFrame.from_features, data["features"])
+        return gdf
     

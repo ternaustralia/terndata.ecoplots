@@ -1,5 +1,6 @@
 import copy
 import httpx
+import orjson
 
 from terndata.ecoplots.nlp_utils import (
     resolve_discovery_facet,
@@ -20,16 +21,16 @@ class _EcoPlotsAPI:
         facet_pram = resolve_discovery_facet(discovery_facet)
 
         if facet_pram:
-            if facet_pram == "region_type" and region_type:
+            if facet_pram == "region" and region_type:
                 region_type_val = resolve_region_type(region_type)
-                url = f"{self.base_url}/api/v1.0/discover/{facet_pram}?region_type={region_type_val}"
+                url = f"{self.base_url}/api/v1.0/discovery/{facet_pram}?region_type={region_type_val}"
             else:
-                url = f"{self.base_url}/api/v1.0/discover/{facet_pram}"
+                url = f"{self.base_url}/api/v1.0/discovery/{facet_pram}"
 
             # TODO: Resolve query parameters using NLP utilities
             payload = copy.deepcopy(query)
 
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
                 return response.json()
@@ -39,10 +40,10 @@ class _EcoPlotsAPI:
     
     async def fetch_data(self, query: dict = {}) -> dict:
         payload = copy.deepcopy(query)
-        async with httpx.AsyncClient() as client:
-            response = await client.post(f"{self.base_url}/api/v1.0/data", json=payload)
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(f"{self.base_url}/api/v1.0/data?dformat=geojson", json=payload)
             response.raise_for_status()
-            return response.json()
+            return orjson.loads(response.content)
         
     
     async def stream_data(self, query: dict = {}) -> dict:
