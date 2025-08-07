@@ -26,3 +26,23 @@ VOCAB_FACETS = [
     # "system_type",
     "core_attributes",
 ]
+
+QUERY_FACETS = [
+    "region_type",
+    "region",
+    "dataset",
+    "site_id",
+    "site_visit_id",
+    "feature_type",
+    "observed_property",
+    "spatial",
+    # "description", #TODO: AI based description to facet mapping
+]
+
+DISCOVERY_FACETS = [
+    "region",
+    "dataset",
+    "feature_type",
+    "observed_property",
+    "site_id",
+]
