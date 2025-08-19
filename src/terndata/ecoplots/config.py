@@ -46,3 +46,11 @@ DISCOVERY_FACETS = [
     "observed_property",
     "site_id",
 ]
+
+DISCOVERY_ATTRIBUTES = [
+    "dataset",
+    "feature_type",
+    "observation",
+    "site",
+    "site_visit",
+]

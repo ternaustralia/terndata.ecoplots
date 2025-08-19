@@ -8,5 +8,8 @@ _cache_thread = threading.Thread(
 )
 _cache_thread.start()
 
-from terndata.ecoplots.ecoplots import EcoPlots
-__all__ = ["EcoPlots"]
+from terndata.ecoplots.ecoplots import EcoPlots, AsyncEcoPlots
+__all__ = [
+    "EcoPlots",
+    "AsyncEcoPlots",
+]

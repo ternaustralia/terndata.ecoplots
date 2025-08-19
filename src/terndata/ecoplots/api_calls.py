@@ -1,62 +1,16 @@
+import aiohttp
 import copy
-import httpx
 import orjson
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Optional
 
-from terndata.ecoplots.config import API_BASE_URL, DISCOVERY_FACETS
+from terndata.ecoplots.config import API_BASE_URL, DISCOVERY_FACETS, DISCOVERY_ATTRIBUTES
 from terndata.ecoplots.nlp_utils import (
     resolve_facet,
     resolve_region_type,
     validate_facet
 )
-
-# class _EcoPlotsAPI:
-#     def __init__(self, base_url: str):
-#         self.base_url = base_url
-
-    
-#     async def discover(
-#         self,
-#         discovery_facet: str,
-#         region_type: str = None,
-#         query: dict = {},
-#     ) -> dict:
-#         facet_pram = resolve_discovery_facet(discovery_facet)
-
-#         if facet_pram:
-#             if facet_pram == "region" and region_type:
-#                 region_type_val = resolve_region_type(region_type)
-#                 url = f"{self.base_url}/api/v1.0/discovery/{facet_pram}?region_type={region_type_val}"
-#             else:
-#                 url = f"{self.base_url}/api/v1.0/discovery/{facet_pram}"
-
-#             # TODO: Resolve query parameters using NLP utilities
-#             payload = copy.deepcopy(query)
-
-#             async with httpx.AsyncClient(timeout=30) as client:
-#                 response = await client.post(url, json=payload)
-#                 response.raise_for_status()
-#                 return response.json()
-#         else:
-#             raise ValueError(f"Invalid discovery facet: {discovery_facet}")
-
-    
-#     async def fetch_data(self, query: dict = {}) -> dict:
-#         payload = copy.deepcopy(query)
-#         async with httpx.AsyncClient(timeout=60) as client:
-#             response = await client.post(f"{self.base_url}/api/v1.0/data?dformat=geojson", json=payload)
-#             response.raise_for_status()
-#             return orjson.loads(response.content)
-        
-    
-#     async def stream_data(self, query: dict = {}) -> dict:
-#         payload = copy.deepcopy(query)
-#         async with httpx.AsyncClient() as client:
-#             response = await client.post(f"{self.base_url}/api/v1.0/data/stream", json=payload)
-#             response.raise_for_status()
-#             return response.json()
 
 class _EcoPlotsAPI:
     def __init__(
@@ -73,27 +27,26 @@ class _EcoPlotsAPI:
     async def discover(
         self,
         discovery_facet: str,
-        region_type: str = None,
-        # query: dict = {},
+        region_type: Optional[str] = None,
     ) -> dict:
         facet_pram = resolve_facet(discovery_facet, DISCOVERY_FACETS)
 
-        if facet_pram:
-            if facet_pram == "region" and region_type:
-                region_type_val = resolve_region_type(region_type)
-                url = f"{self._base_url}/api/v1.0/discovery/{facet_pram}?region_type={region_type_val}"
-            else:
-                url = f"{self._base_url}/api/v1.0/discovery/{facet_pram}"
-
-            # TODO: Resolve query parameters using NLP utilities
-            payload = {"query": copy.deepcopy(self._query_filters)}
-
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                return response.json()
-        else:
+        if not facet_pram:
             raise ValueError(f"Invalid discovery facet: {discovery_facet}")
+
+        if facet_pram == "region" and region_type:
+            region_type_val = resolve_region_type(region_type)
+            url = f"{self._base_url}/api/v1.0/discovery/{facet_pram}?region_type={region_type_val}"
+        else:
+            url = f"{self._base_url}/api/v1.0/discovery/{facet_pram}"
+
+        payload = {"query": copy.deepcopy(self._query_filters)}
+
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as resp:
+                resp.raise_for_status()
+                return await resp.json(loads=orjson.loads)
 
     
     async def fetch_data(
@@ -101,16 +54,51 @@ class _EcoPlotsAPI:
         page_number: Optional[int] = None,
         page_size: Optional[int] = None,
     ) -> dict:
+        
+        
         payload = {
             "query": copy.deepcopy(self._query_filters),
-            "page_number": page_number,
-            "page_size": page_size
+            # "page_number": page_number,
+            # "page_size": page_size
         }
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(f"{self._base_url}/api/v1.0/data?dformat=geojson", json=payload)
-            response.raise_for_status()
-            return orjson.loads(response.content)
+
+        if page_number and page_size:
+            payload.update({
+                "page_number": page_number,
+                "page_size": page_size
+            })
+            timeout = aiohttp.ClientTimeout(total=60)
+        else:
+            timeout = aiohttp.ClientTimeout(total=300)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(f"{self._base_url}/api/v1.0/data?dformat=geojson", json=payload) as resp:
+                resp.raise_for_status()
+                data = await resp.read()
+                return orjson.loads(data)
         
+
+    async def discover_attributes(
+        self,
+        discovery_attribute: str,
+    ) -> dict:
+        facet_pram = resolve_facet(discovery_attribute, DISCOVERY_ATTRIBUTES)
+
+        if not facet_pram:
+            raise ValueError(f"Invalid discovery facet: {discovery_attribute}")
+
+        url = f"{self._base_url}/api/v1.0/discovery/attributes"
+
+        payload = {"query": copy.deepcopy(self._query_filters)}
+
+        params = [("type", facet_pram)]
+
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, params=params, json=payload) as resp:
+                resp.raise_for_status()
+                return await resp.json(loads=orjson.loads)
+
     
     # async def stream_data(self, query: dict = {}) -> dict:
     #     payload = copy.deepcopy(query)
@@ -156,22 +144,24 @@ class _EcoPlotsAPI:
             for future in as_completed(futures):
                 facet, urls, matched, unmatched, corrected = future.result()
                 
-                query_filters.setdefault(facet, set())
-                query_filters[facet].update(urls)
-                
+                # Convert to set for updating
+                existing = set(query_filters.get(facet, []))
+                existing.update(urls)
+                query_filters[facet] = list(existing)
+                            
                 all_matched.setdefault(facet, [])
                 # ensure corrected values are excluded
-                filtered_matched = [x for x in matched if x not in corrected]
-                for val in filtered_matched:
-                    if val not in all_matched[facet]:
-                        all_matched[facet].append(val)
+                all_matched[facet]= [x for x in matched if x not in corrected]
+                # for val in filtered_matched:
+                #     if val not in all_matched[facet]:
+                #         all_matched[facet].append(val)
                 
                 if unmatched:
                     all_unmatched.setdefault(facet, [])
                     all_unmatched[facet].extend(unmatched)
 
             # convert sets to lists
-            query_filters = {facet: list(urls) for facet, urls in query_filters.items()}
+            # query_filters = {facet: list(urls) for facet, urls in query_filters.items()}
         
         if all_unmatched:
             msg = (
