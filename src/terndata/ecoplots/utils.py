@@ -1,3 +1,4 @@
+import os
 import asyncio
 import diskcache
 import orjson
@@ -5,6 +6,7 @@ import warnings
 
 from elasticsearch import AsyncElasticsearch
 from elasticsearch.exceptions import ElasticsearchWarning
+from pathlib import Path
 from typing import Dict, Union, List
 
 from terndata.ecoplots.config import (
@@ -143,3 +145,11 @@ def normalise_to_list(value: Union[str, List[str]]) -> List[str]:
         return [str(v).strip() for v in value if str(v).strip()]
     else:
         raise TypeError(f"Invalid filter value type: {type(value)}")
+
+
+def _atomic_replace(tmp_path: Path, final_path: Path) -> None:
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(tmp_path, final_path)
+
+def _is_zip_project(path: Path) -> bool:
+    return path.suffix.lower() == ".ecoproj"
