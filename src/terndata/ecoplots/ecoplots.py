@@ -241,7 +241,7 @@ class AsyncEcoPlots(EcoPlots):
         if dformat == "json":
             return orjson.dumps(data, option=orjson.OPT_INDENT_2)
         
-        pairs = {"total_doc": data["total_doc"], **data["nique_count"]}
+        pairs = {"total_doc": data["total_doc"], **data["unique_count"]}
         df = (
             pd.Series(pairs, name="count")
                 .rename_axis("metric")
