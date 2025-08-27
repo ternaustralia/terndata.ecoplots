@@ -1,66 +1,28 @@
 import os
+import aiohttp
 import asyncio
 import diskcache
 import orjson
-import warnings
 
-from elasticsearch import AsyncElasticsearch
-from elasticsearch.exceptions import ElasticsearchWarning
 from pathlib import Path
 from typing import Dict, Union, List
 
 from terndata.ecoplots.config import (
+    API_BASE_URL,
     CACHE_DIR,
     CACHE_EXPIRE_SECONDS,
-    ELASTICSEARCH_INDEX_LABELS,
-    ELASTICSEARCH_URL,
     VOCAB_FACETS,
 )
 
 
-warnings.simplefilter(
-    "ignore",
-    ElasticsearchWarning,
-)
-
-class OrjsonSerializer:
-    """Custom serializer for Elasticsearch using orjson"""
-
-    def dumps(self, data):
-        # Serialize to JSON string (Elasticsearch expects str not bytes)
-        return orjson.dumps(data).decode()
-
-    def loads(self, data):
-        # Parse response JSON bytes to Python dict
-        return orjson.loads(data)
-
-
-async def get_single_label(es_client, index, page_size=1000):
-    """
-    Fetches all labels for a given ES index using async search_after pagination.
-    Returns: dict of {uri: label}
-    """
-    result = {}
-    search_after = None
-    more = True
-    while more:
-        body = {
-            "size": page_size,
-            "sort": [{"uri": "asc"}],
-            "query": {"match_all": {}}
-        }
-        if search_after:
-            body["search_after"] = search_after
-
-        resp = await es_client.search(index=index, body=body)
-        hits = resp["hits"]["hits"]
-        for hit in hits:
-            result[hit["_source"]["uri"]] = hit["_source"]["label"]
-        if len(hits) < page_size:
-            more = False
-        else:
-            search_after = hits[-1]["sort"]
-    return result
+async def get_single_label(facet):
+    print("Fetching labels for facet:", facet)
+    url = f"{API_BASE_URL}/api/v1.0/data/label/{facet}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            resp.raise_for_status()
+            result = await resp.json(loads=orjson.loads)
+            return result[facet]
 
 
 async def cache_labels():
@@ -69,35 +31,19 @@ async def cache_labels():
     Stores each as a key in diskcache.
     """
     cache = diskcache.Cache(CACHE_DIR)
-    es_client = AsyncElasticsearch(
-        hosts=[ELASTICSEARCH_URL],
-        retry_on_timeout=True,
-        verify_certs=False,
-        ssl_show_warn=False,
-        serializer=OrjsonSerializer(),
-        timeout=3000,
-    )
-    try:
-        async def fetch_and_cache(facet):
-            # Only fetch if cache is missing or expired
-            # Check if cache exists and is not expired
-            if cache.get(facet, default=None, read=True) is not None:
-                print(f"Using cached labels for facet: {facet}")
-                return facet, cache[facet]
-            index = f"{ELASTICSEARCH_INDEX_LABELS}-{facet}"
-            labels = await get_single_label(es_client, index)
-            cache.set(facet, labels, expire=CACHE_EXPIRE_SECONDS)
-            return facet, labels
+    async def fetch_and_cache(facet):
+        # Only fetch if cache is missing or expired
+        # Check if cache exists and is not expired
+        if cache.get(facet, default=None, read=True) is not None:
+            print(f"Using cached labels for facet: {facet}")
+            return facet, cache[facet]
+        labels = await get_single_label(facet)
+        cache.set(facet, labels, expire=CACHE_EXPIRE_SECONDS)
+        return facet, labels
 
-        tasks = [fetch_and_cache(facet) for facet in VOCAB_FACETS]
-        import time
-        start_time = time.time()
-        results = await asyncio.gather(*tasks)
-        end_time = time.time()
-        print(f"Cached labels for {len(results)} facets in {end_time - start_time} seconds.")
-        return dict(results)
-    finally:
-        await es_client.close()
+    tasks = [fetch_and_cache(facet) for facet in VOCAB_FACETS]
+    results = await asyncio.gather(*tasks)
+    return dict(results)
 
 
 def background_cache_loader():
@@ -108,7 +54,7 @@ def background_cache_loader():
     asyncio.run(cache_labels())
 
 
-def run_sync(coro):
+def run_sync(coro: asyncio.coroutine) -> any:
     """
     Run an async coroutine as a sync call.
     Works in scripts, console, AND notebooks.

@@ -1,20 +1,17 @@
-import os
 import asyncio
 import orjson
 import pandas as pd
 import geopandas as gpd
 
 from diskcache import Cache
-from pathlib import Path
 from typing import Optional, Dict, List, Union
-from terndata.ecoplots.api_calls import _EcoPlotsAPI
+from terndata.ecoplots._base import EcoPlotsBase
 from terndata.ecoplots.config import QUERY_FACETS, CACHE_DIR
 from terndata.ecoplots.utils import run_sync
 from terndata.ecoplots.nlp_utils import resolve_facet
 from terndata.ecoplots._flatten_response._streaming import _flatten_geojson
-import time
 
-class EcoPlots(_EcoPlotsAPI):
+class EcoPlots(EcoPlotsBase):
     """
     A class to interact with the EcoPlots API.
     """
@@ -35,7 +32,7 @@ class EcoPlots(_EcoPlotsAPI):
         if dformat == "json":
             return orjson.dumps(data, option=orjson.OPT_INDENT_2)
         
-        pairs = {"total_doc": data["total_doc"], **data["nique_count"]}
+        pairs = {"total_doc": data["total_doc"], **data["unique_count"]}
         df = (
             pd.Series(pairs, name="count")
                 .rename_axis("metric")
@@ -141,7 +138,18 @@ class EcoPlots(_EcoPlotsAPI):
 
     def get_datasources_attributes(self):
         data = run_sync(self.discover_attributes("dataset"))
-        return pd.DataFrame(data)
+        uris = data.get("dataset_attributes", []) or []
+        rows = []
+        with Cache(CACHE_DIR) as cache:
+            ds_map = cache.get("attributes", {}) or {}
+            for uri in uris:
+                val = ds_map.get(uri, None)
+
+                row = {"key": val, "uri": uri}
+
+                rows.append(row)
+
+        return pd.DataFrame(rows)
 
 
     def get_sites(self) -> pd.DataFrame:
@@ -153,10 +161,26 @@ class EcoPlots(_EcoPlotsAPI):
         data = run_sync(self.discover_attributes("site"))
         uris = data.get("site_attributes", []) or []
         rows = []
-        with Cache(CACHE_DIR) as cache:   # or self.CACHE_DIR if that's how you store it
+        with Cache(CACHE_DIR) as cache:
             site_map = cache.get("attributes", {}) or {}
             for uri in uris:
                 val = site_map.get(uri, None)
+
+                row = {"key": val, "uri": uri}
+
+                rows.append(row)
+
+        return pd.DataFrame(rows)
+    
+
+    def get_site_visit_attributes(self):
+        data = run_sync(self.discover_attributes("site_visit"))
+        uris = data.get("site_visit_attributes", []) or []
+        rows = []
+        with Cache(CACHE_DIR) as cache:
+            sv_map = cache.get("attributes", {}) or {}
+            for uri in uris:
+                val = sv_map.get(uri, None)
 
                 row = {"key": val, "uri": uri}
 
@@ -191,12 +215,30 @@ class EcoPlots(_EcoPlotsAPI):
         return pd.DataFrame(data)
     
 
-    def get_data(self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "geopandas") -> gpd.GeoDataFrame:
+    def get_observation_attributes(self):
+        data = run_sync(self.discover_attributes("observation"))
+        uris = data.get("observation_attributes", []) or []
+        rows = []
+        with Cache(CACHE_DIR) as cache:   # or self.CACHE_DIR if that's how you store it
+            obs_map = cache.get("attributes", {}) or {}
+            for uri in uris:
+                val = obs_map.get(uri, None)
+
+                row = {"key": val, "uri": uri}
+
+                rows.append(row)
+
+        return pd.DataFrame(rows)
+    
+
+    def get_data(
+        self,
+        allow_full_download: Optional[bool] = False,
+        dformat: Optional[str] = "pandas"
+    ) -> gpd.GeoDataFrame:
         """
         Get data from the EcoPlots API based on the current filters.
         """
-        start_time = time.time()
-
         if not self._query_filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
@@ -204,17 +246,11 @@ class EcoPlots(_EcoPlotsAPI):
                 "If you are sure, call get_data(allow_full_download=True)."
             )
         data = run_sync(self.fetch_data())
-        
-        fetch_time = time.time() - start_time
-        print(f"Time taken to fetch data: {fetch_time:.2f} seconds")
 
         if dformat == "geojson":
             return orjson.dumps(data, option=orjson.OPT_INDENT_2)
         
-        flatten_start_time = time.time()
         flattened_data = _flatten_geojson(data)
-        flatten_time = time.time() - flatten_start_time
-        print(f"Time taken to flatten data: {flatten_time:.2f} seconds")
         
         return flattened_data
 
@@ -274,7 +310,18 @@ class AsyncEcoPlots(EcoPlots):
         Asynchronous method to get the attributes of data sources from the EcoPlots API.
         """
         data = await self.discover_attributes("dataset")
-        df = await asyncio.to_thread(pd.DataFrame, data)
+        uris = data.get("dataset_attributes", []) or []
+        rows = []
+        with Cache(CACHE_DIR) as cache:   # or self.CACHE_DIR if that's how you store it
+            ds_map = cache.get("attributes", {}) or {}
+            for uri in uris:
+                val = ds_map.get(uri, None)
+
+                row = {"key": val, "uri": uri}
+
+                rows.append(row)
+        
+        df = await asyncio.to_thread(pd.DataFrame, rows)
         return df
     
 
@@ -304,6 +351,26 @@ class AsyncEcoPlots(EcoPlots):
                 rows.append(row)
 
         return pd.DataFrame(rows)
+    
+
+    async def get_site_visit_attributes(self):
+        """
+        Asynchronous method to get the attributes of site visits from the EcoPlots API.
+        """
+        data = await self.discover_attributes("site_visit")
+        uris = data.get("site_visit_attributes", []) or []
+        rows = []
+        with Cache(CACHE_DIR) as cache:   # or self.CACHE_DIR if that's how you store it
+            sv_map = cache.get("attributes", {}) or {}
+            for uri in uris:
+                val = sv_map.get(uri, None)
+
+                row = {"key": val, "uri": uri}
+
+                rows.append(row)
+
+        df = await asyncio.to_thread(pd.DataFrame, rows)
+        return df
     
 
     async def get_region_types(self) -> pd.DataFrame:
@@ -340,9 +407,33 @@ class AsyncEcoPlots(EcoPlots):
         data = await self.discover("observed_property")
         df = await asyncio.to_thread(pd.DataFrame, data)
         return df
+    
+
+    async def get_observation_attributes(self):
+        """
+        Asynchronous method to get the attributes of observations from the EcoPlots API.
+        """
+        data = await self.discover_attributes("observation")
+        uris = data.get("observation_attributes", []) or []
+        rows = []
+        with Cache(CACHE_DIR) as cache:
+            obs_map = cache.get("attributes", {}) or {}
+            for uri in uris:
+                val = obs_map.get(uri, None)
+
+                row = {"key": val, "uri": uri}
+
+                rows.append(row)
+
+        df = await asyncio.to_thread(pd.DataFrame, rows)
+        return df
 
 
-    async def get_data(self, allow_full_download: bool = False) -> gpd.GeoDataFrame:
+    async def get_data(
+        self,
+        allow_full_download: Optional[bool] = False,
+        dformat: Optional[str] = "pandas"
+    ) -> gpd.GeoDataFrame:
         """
         Asynchronous method to get data from the EcoPlots API based on the current filters.
         """
@@ -353,5 +444,9 @@ class AsyncEcoPlots(EcoPlots):
                 "If you are sure, call get_data(allow_full_download=True)."
             )
         data = await self.fetch_data()
-        gdf = await asyncio.to_thread(gpd.GeoDataFrame.from_features, data["features"])
+
+        if dformat == "geojson":
+            return orjson.dumps(data, option=orjson.OPT_INDENT_2)
+
+        gdf = asyncio.to_thread(_flatten_geojson, data)
         return gdf

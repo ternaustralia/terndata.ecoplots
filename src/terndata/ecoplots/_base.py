@@ -16,8 +16,8 @@ from terndata.ecoplots.nlp_utils import (
 )
 from terndata.ecoplots.utils import _atomic_replace, _is_zip_project
 
-SelfType = TypeVar("SelfType", bound="_EcoPlotsAPI")
-class _EcoPlotsAPI:
+SelfType = TypeVar("SelfType", bound="EcoPlotsBase")
+class EcoPlotsBase:
     def __init__(
         self,
         base_url: Optional[str] = None,
@@ -114,7 +114,8 @@ class _EcoPlotsAPI:
             # "page_size": page_size
         }
 
-        async with aiohttp.ClientSession(timeout=30) as session:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(f"{self._base_url}/api/v1.0/data/summary", json=payload) as resp:
                 resp.raise_for_status()
                 data = await resp.read()
