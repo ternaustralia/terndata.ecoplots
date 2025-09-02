@@ -1,14 +1,14 @@
 import threading
-from terndata.ecoplots.utils import background_cache_loader
+from .utils import _background_cache_loader
 
 # Start the background cache loading thread at import time
 _cache_thread = threading.Thread(
-    target=background_cache_loader,
+    target=_background_cache_loader,
     daemon=True
 )
 _cache_thread.start()
 
-from terndata.ecoplots.ecoplots import EcoPlots, AsyncEcoPlots
+from .ecoplots import EcoPlots, AsyncEcoPlots
 __all__ = [
     "EcoPlots",
     "AsyncEcoPlots",

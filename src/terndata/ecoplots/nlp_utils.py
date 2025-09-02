@@ -4,7 +4,8 @@ import warnings
 
 from rapidfuzz import process, fuzz
 from typing import Dict, List, Union
-from terndata.ecoplots.utils import normalise_to_list, get_cached_labels
+
+from .utils import _normalise_to_list, _get_cached_labels
 
 ALL_FACETS = [
     "region_type",
@@ -159,7 +160,7 @@ async def resolve_facet_inputs(facet: str, user_values: List[str], region_type: 
     if facet == "region" and not region_type:
         raise ValueError("Filtering by 'region' requires 'region_type' to be provided.")
 
-    labels_dict = get_cached_labels(facet)
+    labels_dict = _get_cached_labels(facet)
     loop = asyncio.get_event_loop()
     
     tasks = [
@@ -182,7 +183,7 @@ async def build_structured_query_async(user_filters: Dict[str, Union[str, List[s
     for facet, value in user_filters.items():
         if not value:
             continue
-        values_list = normalise_to_list(value)
+        values_list = _normalise_to_list(value)
         facet_tasks.append(
             asyncio.create_task(resolve_facet_inputs(facet, values_list, region_type=region_type))
         )
@@ -247,7 +248,7 @@ def resolve_filter_values_to_urls(
 
 
 def validate_facet(facet, value):
-    labels_dict = get_cached_labels(facet)
+    labels_dict = _get_cached_labels(facet)
     user_values = value if isinstance(value, (list, tuple)) else [value]
     urls, matched, unmatched, corrected = resolve_filter_values_to_urls(
         facet, user_values, labels_dict

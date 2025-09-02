@@ -1,13 +1,15 @@
 import os
+import re
 import aiohttp
 import asyncio
 import diskcache
 import orjson
 
-from pathlib import Path
-from typing import Dict, Union, List
 
-from terndata.ecoplots.config import (
+from pathlib import Path
+from typing import Dict, Union, List, Any
+
+from .config import (
     API_BASE_URL,
     CACHE_DIR,
     CACHE_EXPIRE_SECONDS,
@@ -15,7 +17,17 @@ from terndata.ecoplots.config import (
 )
 
 
-async def get_single_label(facet):
+_WKT_RE = re.compile(
+    r"^\s*(SRID=\d+;)?\s*(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*\(.*\)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+_GEOJSON_GEOM = {
+    "Point","LineString","Polygon","MultiPoint","MultiLineString","MultiPolygon","GeometryCollection"
+}
+
+
+async def _get_single_label(facet):
     print("Fetching labels for facet:", facet)
     url = f"{API_BASE_URL}/api/v1.0/data/label/{facet}"
     async with aiohttp.ClientSession() as session:
@@ -25,7 +37,7 @@ async def get_single_label(facet):
             return result[facet]
 
 
-async def cache_labels():
+async def _cache_labels():
     """
     Fetches and caches labels for all facets using asyncio.gather.
     Stores each as a key in diskcache.
@@ -37,7 +49,7 @@ async def cache_labels():
         if cache.get(facet, default=None, read=True) is not None:
             print(f"Using cached labels for facet: {facet}")
             return facet, cache[facet]
-        labels = await get_single_label(facet)
+        labels = await _get_single_label(facet)
         cache.set(facet, labels, expire=CACHE_EXPIRE_SECONDS)
         return facet, labels
 
@@ -46,15 +58,15 @@ async def cache_labels():
     return dict(results)
 
 
-def background_cache_loader():
+def _background_cache_loader():
     """
     Background task to cache labels for all facets.
     This can be run periodically to refresh the cache.
     """
-    asyncio.run(cache_labels())
+    asyncio.run(_cache_labels())
 
 
-def run_sync(coro: asyncio.coroutine) -> any:
+def _run_sync(coro: asyncio.coroutine) -> any:
     """
     Run an async coroutine as a sync call.
     Works in scripts, console, AND notebooks.
@@ -72,7 +84,7 @@ def run_sync(coro: asyncio.coroutine) -> any:
         return asyncio.run(coro)
     
 
-def get_cached_labels(facet: str = None) -> Dict[str, str]:
+def _get_cached_labels(facet: str = None) -> Dict[str, str]:
     cache = diskcache.Cache(CACHE_DIR)
     if facet:
         labels = cache.get(facet)
@@ -81,7 +93,7 @@ def get_cached_labels(facet: str = None) -> Dict[str, str]:
         return labels
     
 
-def normalise_to_list(value: Union[str, List[str]]) -> List[str]:
+def _normalise_to_list(value: Union[str, List[str]]) -> List[str]:
     """
     Normalizes a single string or a list of strings to a list.
     """
@@ -99,3 +111,45 @@ def _atomic_replace(tmp_path: Path, final_path: Path) -> None:
 
 def _is_zip_project(path: Path) -> bool:
     return path.suffix.lower() == ".ecoproj"
+
+def _is_wkt(s: str) -> bool:
+    # Fast checks only (no parsing):
+    if not isinstance(s, str): return False
+    if s.count("(") != s.count(")"): return False  # balanced parens
+    return bool(_WKT_RE.match(s.strip()))
+
+def _is_geojson(obj: Any) -> bool:
+    if not isinstance(obj, dict): return False
+    t = obj.get("type")
+    if t == "Feature":
+        return isinstance(obj.get("geometry"), (dict, type(None)))
+    if t == "FeatureCollection":
+        feats = obj.get("features")
+        return isinstance(feats, list)  # don’t deep-validate each feature here
+    if t in _GEOJSON_GEOM:
+        # Geometry must have 'coordinates' or 'geometries' (for collection)
+        return ("coordinates" in obj) or (t == "GeometryCollection" and "geometries" in obj)
+    return False
+
+def _is_bbox4(v: Any) -> bool:
+    # EXACT requirement: bbox passed as array/tuple of length 4 (no "BBOX(...)" strings)
+    if not (isinstance(v, (list, tuple)) and len(v) == 4):
+        return False
+    try:
+        _ = [float(x) for x in v]  # numeric-ish
+    except Exception:
+        return False
+    return True
+
+def _validate_spatial_input(value: Any) -> str:
+    """
+    Validate 'spatial' input format only.
+    Returns one of {'wkt','geojson','bbox'} if valid; raises ValueError otherwise.
+    """
+    if isinstance(value, str) and _is_wkt(value):
+        return "wkt"
+    if isinstance(value, dict) and _is_geojson(value):
+        return "geojson"
+    if _is_bbox4(value):
+        return "bbox"
+    raise ValueError("'spatial' must be WKT string, GeoJSON dict, or bbox [minx, miny, maxx, maxy].")
