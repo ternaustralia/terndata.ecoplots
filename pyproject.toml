@@ -34,6 +34,9 @@ dependencies = { file = ["requirements.txt"] }
 requires = ["setuptools", "setuptools_scm[toml]"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-data]
+"terndata.ecoplots.assets" = ["*.png", "*.svg", "*.jpg", "*.jpeg", "*.gif"]
+
 [tool.setuptools_scm]
 write_to = "src/terndata/ecoplots/version.py"
 fallback_version = "0.0.0.dev0"

@@ -1,37 +1,38 @@
-import aiohttp
 import copy
-import orjson
-import requests
+import hashlib
+import struct
 import tempfile
 import warnings
-import zipfile
-
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import (
-    Dict,
     Optional,
-    Union,
     TypeVar,
-    Type,
-    List,
-    Iterable,
+    Union,
 )
 
-from .config import (
+import aiohttp
+import orjson
+import requests
+
+from ._config import (
     API_BASE_URL,
-    DISCOVERY_FACETS,
     DISCOVERY_ATTRIBUTES,
+    DISCOVERY_FACETS,
+    MAGIC,
     QUERY_FACETS,
+    VERSION,
 )
-from .nlp_utils import (
+from ._nlp_utils import (
     resolve_facet,
     resolve_region_type,
     validate_facet,
 )
-from .utils import _atomic_replace, _is_zip_project, _validate_spatial_input
+from ._utils import _ensure_ecoproj_path, _validate_spatial_input
 
 SelfType = TypeVar("SelfType", bound="EcoPlotsBase")
+
 
 class EcoPlotsBase:
     """Base class providing internal filter management and API query building.
@@ -50,8 +51,8 @@ class EcoPlotsBase:
     def __init__(
         self,
         base_url: Optional[str] = None,
-        filterset: Optional[Dict] = None,
-        query_filters: Optional[Dict] = None
+        filterset: Optional[dict] = None,
+        query_filters: Optional[dict] = None,
     ):
         """Initialize an EcoPlotsBase instance.
 
@@ -66,14 +67,10 @@ class EcoPlotsBase:
                 to pre-populate the instance.
             query_filters: Optional mapping of facet -> list of API-ready values
                 (eg. URLs) to pre-populate the instance.
-
-        Returns:
-            None
         """
         self._base_url = base_url or API_BASE_URL
         self._filters = filterset or {}
         self._query_filters = query_filters or {}
-
 
     def __eq__(self, other) -> bool:
         """Compare two instances for structural equality.
@@ -88,13 +85,9 @@ class EcoPlotsBase:
         Returns:
             True if both type and internal filter state match, False otherwise.
         """
-        if type(self) is not type(other):
+        if type(self) is not type(other):  # noqa: PIE789
             return False
-        return (
-            self._filters == other._filters and
-            self._query_filters == other._query_filters
-        )
-    
+        return self._filters == other._filters and self._query_filters == other._query_filters
 
     def __bool__(self) -> bool:
         """Truthiness of the instance.
@@ -108,7 +101,6 @@ class EcoPlotsBase:
         """
         return bool(self._filters) and bool(self._query_filters)
 
-
     def __len__(self) -> int:
         """Return the count of selected filter values.
 
@@ -119,7 +111,6 @@ class EcoPlotsBase:
             Total number of selected filter values (int).
         """
         return sum(len(v) for v in self._filters.values())
-
 
     def __copy__(self):
         """Create a shallow copy of the instance.
@@ -135,7 +126,6 @@ class EcoPlotsBase:
             filterset=copy.copy(self._filters),
             query_filters=copy.copy(self._query_filters),
         )
-
 
     def __deepcopy__(self, memo):
         """Create a deep copy of the instance.
@@ -153,7 +143,6 @@ class EcoPlotsBase:
             filterset=copy.deepcopy(self._filters, memo),
             query_filters=copy.deepcopy(self._query_filters, memo),
         )
-    
 
     def __contains__(self, item: str) -> bool:
         """Check if a facet is currently applied.
@@ -176,8 +165,7 @@ class EcoPlotsBase:
             raise KeyError(f"Invalid key `{item}`. Allowed: " + ", ".join(QUERY_FACETS))
         return item in self._filters and item in self._query_filters
 
-
-    def __getitem__(self, item: str) -> List:
+    def __getitem__(self, item: str) -> list:
         """Retrieve the human-visible values for a given facet.
 
         Validates the facet name and ensures it is present in the current
@@ -198,9 +186,8 @@ class EcoPlotsBase:
         if item not in self._filters:
             raise KeyError(f"Key `{item}` not present in current instance.")
         return self._filters.get(item, [])
-    
 
-    def __setitem__(self, facet: str, values: Union[str, List[str]]):
+    def __setitem__(self, facet: str, values: Union[str, list[str]]):
         """Assign values to a facet (delegates to select).
 
         This operator-style API is a convenience wrapper that validates the
@@ -212,13 +199,12 @@ class EcoPlotsBase:
             values: Single value or iterable of values to apply to the facet.
 
         Raises:
-            ``KeyError``: If the facet is not allowed.
+            KeyError: If the facet is not allowed.
         """
         if facet not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{facet}`. Allowed: " + ", ".join(QUERY_FACETS))
         self.select(facet, values)
 
-    
     def __delitem__(self, key) -> None:
         """Delete a facet or specific values from a facet (delegates to remove).
 
@@ -234,7 +220,7 @@ class EcoPlotsBase:
             key: Either a single facet name (str) or a tuple (facet, values).
 
         Raises:
-            ``KeyError``: If the facet is unknown or tuple form is malformed.
+            KeyError: If the facet is unknown or tuple form is malformed.
         """
         if isinstance(key, tuple):
             if len(key) != 2:
@@ -250,8 +236,7 @@ class EcoPlotsBase:
                 raise KeyError(f"Unknown facet {key!r}. Allowed: {', '.join(QUERY_FACETS)}")
             self.remove(**{key: None})
 
-
-    def select(self, filters: Optional[Dict] = None, **kwargs) -> SelfType:
+    def select(self, filters: Optional[dict] = None, **kwargs) -> SelfType:
         """Add/merge filters and validate them.
 
         Accepts either a dict or keyword arguments.
@@ -261,13 +246,13 @@ class EcoPlotsBase:
             **kwargs: Alternative way to pass filters, e.g. ``site_id="ABC"``.
 
         Raises:
-            ``ValueError``: Unknown filter keys.
-            ``ValueError``: ``region`` provided without current or new ``region_type``.
+            ValueError: Unknown filter keys.
+            ValueError: ``region`` provided without current or new ``region_type``.
 
         Returns:
-            EcoPlots: ``self`` for chaining.
+            self for chaining.
         """
-        print(f"Current filters: {self._filters}")  # Debugging output
+        # print(f"Current filters: {self._filters}")  # Debugging output
         # Merge filters from dict and kwargs
         input_filters = {}
 
@@ -295,7 +280,7 @@ class EcoPlotsBase:
             if k == "spatial":
                 _validate_spatial_input(v)  # validate spatial filter
                 # replace any existing spatial filter
-                self._filters["spatial"] = [v]
+                self._filters["spatial"] = v
                 continue
             if not isinstance(v, (list, tuple)):
                 v = [v]
@@ -307,12 +292,11 @@ class EcoPlotsBase:
         # 4. Validate filters
         self._validate_filters()
 
-        print(f"Filters updated: {self._filters}")  # Debugging output
+        # print(f"Filters updated: {self._filters}")  # Debugging output
 
         return self
-    
 
-    def remove(self, filters: Optional[Dict] = None, **kwargs) -> SelfType:
+    def remove(self, filters: Optional[dict] = None, **kwargs) -> SelfType:
         """Remove whole facets or specific values (same ergonomics as ``select``).
 
         Accepts either a dict or keyword arguments. For each facet:
@@ -325,15 +309,15 @@ class EcoPlotsBase:
             **kwargs: Alternative way to pass removals, e.g. ``site_id="TCFTNS0002"``.
 
         Raises:
-            ``ValueError``: Unknown filter keys (not in ``QUERY_FACETS``).
-            ``KeyError``: Facet not present in current filters.
-            ``ValueError``: Specific values requested but not found for that facet.
+            ValueError: Unknown filter keys (not in ``QUERY_FACETS``).
+            KeyError: Facet not present in current filters.
+            ValueError: Specific values requested but not found for that facet.
 
         Returns:
-            EcoPlots: ``self`` (chainable).
+            self (chainable)
         """
         # Merge inputs (dict + kwargs), exactly like select()
-        input_filters: Dict[str, Union[None, str, Iterable[str]]] = {}
+        input_filters = {}
         if filters:
             input_filters.update(filters)
         if kwargs:
@@ -358,7 +342,10 @@ class EcoPlotsBase:
                 continue
 
             if facet == "spatial" and vals is not None:
-                raise ValueError("Cannot remove specific values from 'spatial' filter; use None to clear entire facet.")
+                raise ValueError(
+                    "Cannot remove specific values from 'spatial' filter; "
+                    "use None to clear entire facet."
+                )
 
             # normalize to a list
             if isinstance(vals, (str, bytes)) or not isinstance(vals, Iterable):
@@ -388,7 +375,6 @@ class EcoPlotsBase:
             self._validate_filters()
 
         return self
-    
 
     def clear(self) -> SelfType:
         """Clear all filters from the instance.
@@ -396,21 +382,20 @@ class EcoPlotsBase:
         The method mutates the instance and returns it to allow fluent/chained calls.
 
         Returns:
-            EcoPlots: The same instance with its filters cleared.
+            self (chainable)
         """
         self._filters = {}
         self._query_filters = {}
         return self
 
-
-    def get_filter(self, facet: Optional[str] = None) -> Union[List, Dict]:
+    def get_filter(self, facet: Optional[str] = None) -> Union[list, dict]:
         """Return the current filter values for a specific facet or all applied filters.
 
         Args:
             facet: The facet to retrieve the filter for. Defaults to All.
 
         Raises:
-            ``ValueError``: If an invalid facet name is provided.
+            ValueError: If an invalid facet name is provided.
 
         Returns:
             The current filter values for the specified facet as list.
@@ -420,22 +405,20 @@ class EcoPlotsBase:
             facet_val = resolve_facet(facet, QUERY_FACETS)
             if facet_val:
                 return self._filters.get(facet_val)
-            else:
-                raise ValueError(
-                    f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
-                )
-        
+            raise ValueError(
+                f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
+            )
+
         return orjson.dumps(self._filters, option=orjson.OPT_INDENT_2).decode("utf-8")
 
-
-    def get_api_query_filters(self, facet: str = None) -> Union[List, Dict]:
+    def get_api_query_filters(self, facet: str = None) -> Union[list, dict]:
         """Return the current query filters for ecoplots API for a specified facet or all facet.
 
         Args:
             facet: The facet to retrieve the query filters for. Defaults to None.
 
         Raises:
-            ``ValueError``: If an invalid facet name is provided.
+            ValueError: If an invalid facet name is provided.
 
         Returns:
             A dictionary of the current query filters.
@@ -445,20 +428,18 @@ class EcoPlotsBase:
             facet_val = resolve_facet(facet, QUERY_FACETS)
             if facet_val:
                 return self._query_filters.get(facet_val)
-            else:
-                raise ValueError(
-                    f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
-                )
+            raise ValueError(
+                f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
+            )
 
         return orjson.dumps(self._query_filters, option=orjson.OPT_INDENT_2).decode("utf-8")
 
-    
     def discover(
         self,
         discovery_facet: str,
         region_type: Optional[str] = None,
     ) -> dict:
-        """[INTERNAL] Resolve and call the discovery endpoint for a facet.
+        """Resolve and call the discovery endpoint for a facet.
 
         Args:
             discovery_facet: Facet to discover (must resolve via configured discovery facets).
@@ -468,12 +449,11 @@ class EcoPlotsBase:
             Parsed JSON payload returned by the discovery endpoint.
 
         Raises:
-            ``ValueError``: If the facet cannot be resolved.
-            ``HTTPError``: If the server returns a non-success status code.
-            ``RequestException``: For network or request-level errors.
+            ValueError: If the facet cannot be resolved.
 
         Notes:
-            A 10-second request timeout is enforced.
+            - Internal use only
+            - A 10-second request timeout is enforced.
         """
 
         facet_param = resolve_facet(discovery_facet, DISCOVERY_FACETS)
@@ -493,13 +473,12 @@ class EcoPlotsBase:
         resp.raise_for_status()
         return orjson.loads(resp.content)
 
-    
     async def fetch_data(
         self,
         page_number: Optional[int] = None,
         page_size: Optional[int] = None,
     ) -> dict:
-        """[INTERNAL] Fetch data for the current query, optionally paginated.
+        """Fetch data for the current query, optionally paginated.
 
         Posts the current query filters to `EcoPlots API` data endpoint.
 
@@ -510,16 +489,11 @@ class EcoPlotsBase:
         Returns:
             Parsed JSON payload (GeoJSON) returned by the data endpoint.
 
-        Raises:
-            ``ClientResponseError``: If the server returns a non-success status code.
-            ``aiohttp.ClientError``: For network or client-level errors.
-            ``asyncio.TimeoutError``: If the request exceeds the timeout.
-
         Notes:
-            Timeout is 60s when pagination is used; otherwise 300s.
-            This coroutine performs network I/O and is intended for internal use.
+            - Timeout is 60s when pagination is used; otherwise 300s.
+            - Intended for internal use only.
         """
-        
+
         payload = {
             "query": copy.deepcopy(self._query_filters),
             # "page_number": page_number,
@@ -527,42 +501,38 @@ class EcoPlotsBase:
         }
 
         if page_number and page_size:
-            payload.update({
-                "page_number": page_number,
-                "page_size": page_size
-            })
+            payload.update({"page_number": page_number, "page_size": page_size})
             timeout = aiohttp.ClientTimeout(total=60)
         else:
             timeout = aiohttp.ClientTimeout(total=300)
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(f"{self._base_url}/api/v1.0/data?dformat=geojson", json=payload) as resp:
+            async with session.post(
+                f"{self._base_url}/api/v1.0/data?dformat=geojson", json=payload
+            ) as resp:
                 resp.raise_for_status()
                 data = await resp.read()
                 return orjson.loads(data)
-        
 
     def discover_attributes(
         self,
         discovery_attribute: str,
     ) -> dict:
-        """[INTERNAL] Discovers attribute URIs for a given entity type.
+        """Discovers attribute URIs for a given entity type.
 
         Args:
-            discovery_attribute: Attribute namespace to discover 
-            (must resolve via configured discovery attributes).
+            discovery_attribute: Attribute namespace to discover
+                (must resolve via configured discovery attributes).
 
         Returns:
             Parsed JSON payload containing attribute identifiers.
 
         Raises:
-            ``ValueError``: If the attribute cannot be resolved.
-            ``HTTPError``: If the server returns a non-success status code.
-            ``RequestException``: For network or request-level errors.
+            ValueError: If the attribute cannot be resolved.
 
         Notes:
-            A 30-second request timeout is enforced.
-            This method is internal and subject to change.
+            - A 30-second request timeout is enforced.
+            - Intended for internal use only.
         """
         facet_param = resolve_facet(discovery_attribute, DISCOVERY_ATTRIBUTES)
 
@@ -578,10 +548,9 @@ class EcoPlotsBase:
         resp = requests.post(url, params=params, json=payload, timeout=30)
         resp.raise_for_status()
         return orjson.loads(resp.content)
-            
 
-    def summarise_data(self, query_filters: Optional[Dict] = None) -> dict:
-        """[INTERNAL] Request a lightweight summary for the given or current query filters.
+    def summarise_data(self, query_filters: Optional[dict] = None) -> dict:
+        """Request a lightweight summary for the given or current query filters.
 
         Args:
             query_filters: Canonical filters to use for the summary. When omitted, the
@@ -590,104 +559,145 @@ class EcoPlotsBase:
         Returns:
             Parsed JSON payload containing counts and related summary fields.
 
-        Raises:
-            HTTPError: If the server returns a non-success status code.
-            RequestException: For network or request-level errors.
-
         Notes:
-            A 30-second request timeout is enforced.
+            - A 30-second request timeout is enforced.
+            - Intended for internal use only.
         """
         payload = {
-            "query": copy.deepcopy(query_filters) if (
-                query_filters is not None
-            ) else copy.deepcopy(self._query_filters),
+            "query": (
+                copy.deepcopy(query_filters)
+                if (query_filters is not None)
+                else copy.deepcopy(self._query_filters)
+            ),
         }
 
         resp = requests.post(f"{self._base_url}/api/v1.0/data/summary", json=payload, timeout=30)
         resp.raise_for_status()
         return orjson.loads(resp.content)
 
-    
     # async def stream_data(self, query: dict = {}) -> dict:
     #     payload = copy.deepcopy(query)
     #     async with httpx.AsyncClient() as client:
     #         response = await client.post(f"{self.base_url}/api/v1.0/data/stream", json=payload)
     #         response.raise_for_status()
     #         return response.json()
-        
+
     def save(self, path: Optional[Union[str, Path]] = None) -> str:
+        """Save project state to a single `.ecoproj` file (atomic, checksummed).
+
+        Writes the current `filters` and `query_filters` into a compact binary file
+        with a small header and a JSON (orjson) payload. The filename resolution is:
+
+        - If `path` is `None`: save as `./ecoplots_<UTCSTAMP>.ecoproj`.
+        - If `path` has no `.ecoproj` suffix and no parent directory: save as
+        `./<name>.ecoproj` in the current working directory.
+        - If `path` ends with `.ecoproj`: save exactly to that location.
+
+        Args:
+            path: Optional target path or bare name. If omitted, a timestamped
+                filename is created in the current working directory.
+
+        Returns:
+            Absolute path to the saved `.ecoproj` file.
+
+        Raises:
+            Exception: Any unexpected error during the write; temporary files are
+                cleaned up best-effort before re-raising.
         """
-        Save a minimal project containing filters + query_filters.
 
-        Behavior:
-          - path endswith .ecoproj -> write a single ZIP with filters.json + query_filters.json
-          - path is a directory     -> write those two files into the directory
-          - path is None            -> write into ./ecoplots_project (create if missing)
-        """
-        if path is None:
-            target = Path.cwd() / "ecoplots_project"
-            target.mkdir(parents=True, exist_ok=True)
-            (target / "filters.json").write_bytes(orjson.dumps(self._filters, option=orjson.OPT_INDENT_2))
-            (target / "query_filters.json").write_bytes(orjson.dumps(self._query_filters, option=orjson.OPT_INDENT_2))
-            return str(target)
+        target = _ensure_ecoproj_path(path).resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
 
-        target = Path(path)
+        payload = {"filters": self._filters, "query_filters": self._query_filters}
+        body = orjson.dumps(payload, option=orjson.OPT_SORT_KEYS)
+        sha = hashlib.sha256(body).digest()
 
-        if _is_zip_project(target):
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ecoproj")
-            tmp_path = Path(tmp.name)
-            tmp.close()
-            try:
-                with zipfile.ZipFile(tmp_path, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-                    z.writestr("filters.json", orjson.dumps(self._filters, option=orjson.OPT_INDENT_2))
-                    z.writestr("query_filters.json", orjson.dumps(self._query_filters, option=orjson.OPT_INDENT_2))
-                _atomic_replace(tmp_path, target)
-            finally:
-                if tmp_path.exists():
-                    try: tmp_path.unlink()
-                    except OSError: pass
-            return str(target)
+        # Header: MAGIC (4) | VERSION (1) | SHA256 (32) | LEN (8, big-endian)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ecoproj")
+        tmp_path = Path(tmp.name)
 
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "filters.json").write_bytes(orjson.dumps(self._filters, option=orjson.OPT_INDENT_2))
-        (target / "query_filters.json").write_bytes(orjson.dumps(self._query_filters, option=orjson.OPT_INDENT_2))
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(MAGIC)
+                f.write(struct.pack(">B", VERSION))
+                f.write(sha)
+                f.write(struct.pack(">Q", len(body)))
+                f.write(body)
+            # Atomic replace
+            target.replace(target) if target.exists() else None
+            tmp_path.replace(target)
+        except Exception as e:
+            tmp_path.unlink(missing_ok=True)
+            raise e
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+
         return str(target)
 
-    
     @classmethod
-    def load(cls: Type[SelfType], path: Union[str, Path]) -> SelfType:
-        """
-        Load filters + query_filters from a .ecoproj ZIP or a directory.
-        Returns an instance of `cls` (works for subclasses if they accept
-        filterset/query_filters in __init__).
-        """
-        p = Path(path)
-        if _is_zip_project(p):
-            with zipfile.ZipFile(p, "r") as z:
-                filters = orjson.loads(z.read("filters.json"))
-                qfilters = orjson.loads(z.read("query_filters.json"))
-        else:
-            filters_path = p / "filters.json"
-            qfilters_path = p / "query_filters.json"
-            if not (filters_path.exists() and qfilters_path.exists()):
-                raise FileNotFoundError(
-                    f"Expected {filters_path} and {qfilters_path} in project directory."
-                )
-            filters = orjson.loads(filters_path.read_bytes())
-            qfilters = orjson.loads(qfilters_path.read_bytes())
+    def load(cls: type[SelfType], path: Union[str, Path]) -> SelfType:
+        """Load a `.ecoproj` file, validate integrity, and return a new instance.
 
-        return cls(filterset=filters, query_filters=qfilters)
-    
+        Args:
+            path: Path to a `.ecoproj` file previously created by :meth:`save`.
+
+        Returns:
+            A new instance of `EcoPlots` with `filters` and `query_filters` restored.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the file does not have a `.ecoproj` suffix, the magic
+                header or version is invalid, the file is truncated, or the checksum
+                does not match the payload.
+        """
+        p = Path(path).resolve()
+        if not p.exists():
+            raise FileNotFoundError(str(p))
+        if p.suffix != ".ecoproj":
+            raise ValueError(f"Expected a '.ecoproj' file, got: {p.name}")
+
+        with open(p, "rb") as f:
+            if f.read(4) != MAGIC:
+                raise ValueError("Invalid project file (bad magic).")
+            ver = struct.unpack(">B", f.read(1))[0]
+            if ver != VERSION:
+                raise ValueError(f"Incompatible project version: {ver} (expected {VERSION}).")
+            sha = f.read(32)
+            n = struct.unpack(">Q", f.read(8))[0]
+            body = f.read(n)
+            if len(body) != n:
+                raise ValueError("Truncated project file.")
+            if hashlib.sha256(body).digest() != sha:
+                raise ValueError("Project integrity check failed (checksum mismatch).")
+
+        data = orjson.loads(body)
+
+        return cls(filterset=data.get("filters", {}), query_filters=data.get("query_filters", {}))
 
     def _validate_filters(self) -> bool:
-        """[INTERNAL] Validate filters in parallel for all facets. Not for direct user use."""
+        """Validate filters in parallel for all facets. Not for direct user use.
+
+        Returns:
+            `True` if filters validate and the summary indicates one or more
+            matching records; `False` if validation succeeded but the selection
+            yields zero records (a warning is issued).
+
+        Raises:
+            ValueError: If any facet contains values that cannot be matched.
+
+        Notes:
+            - Intended for internal use only.
+        """
 
         query_filters = copy.deepcopy(self._query_filters)
         all_unmatched = {}
         all_matched = copy.deepcopy(self._filters)
 
         if "spatial" in all_matched:
-            query_filters["spatial"] = list(all_matched["spatial"])
+            query_filters["spatial"] = all_matched["spatial"]
+
+        to_validate = {k: v for k, v in self._filters.items() if k != "spatial"}
 
         with ThreadPoolExecutor() as executor:
             futures = {
@@ -696,50 +706,47 @@ class EcoPlotsBase:
                 # so we can leverage "true" parallelism here with ThreadPoolExecutor
                 # for CPU bound fuzzy matching and is much faster than asyncio.gather.
                 executor.submit(validate_facet, facet, value): facet
-                for facet, value in self._filters.items()
+                for facet, value in to_validate.items()
             }
 
             for future in as_completed(futures):
                 facet, urls, matched, unmatched, corrected = future.result()
-                
+
                 # Convert to set for updating
                 existing = set(query_filters.get(facet, []))
                 existing.update(urls)
                 query_filters[facet] = list(existing)
-                            
+
                 all_matched.setdefault(facet, [])
                 # ensure corrected values are excluded
-                all_matched[facet]= [x for x in matched if x not in corrected]
+                all_matched[facet] = [x for x in matched if x not in corrected]
                 # for val in filtered_matched:
                 #     if val not in all_matched[facet]:
                 #         all_matched[facet].append(val)
-                
+
                 if unmatched:
                     all_unmatched.setdefault(facet, [])
                     all_unmatched[facet].extend(unmatched)
 
             # convert sets to lists
             # query_filters = {facet: list(urls) for facet, urls in query_filters.items()}
-        
+
         if all_unmatched:
-            msg = (
-                "The following filter values could not be matched:\n" +
-                "\n".join(
-                    f"Facet '{facet}': {unmatched}" 
-                    for facet, unmatched in all_unmatched.items()
-                )
+            msg = "The following filter values could not be matched:\n" + "\n".join(
+                f"Facet '{facet}': {unmatched}" for facet, unmatched in all_unmatched.items()
             )
             raise ValueError(msg)
-        
+
         data = self.summarise_data(query_filters=query_filters)
         if data.get("total_doc", 0) == 0:
             warnings.warn(
                 "The applied filters result in zero matching records. "
                 "Please adjust your filters. Skipping current selection...",
-                UserWarning
+                UserWarning,
+                stacklevel=3,
             )
             return False
-        
+
         self._query_filters = query_filters
         self._filters = all_matched
 

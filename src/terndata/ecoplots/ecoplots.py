@@ -1,14 +1,38 @@
+"""Provide synchronous and asynchronous clients for the EcoPlots REST API.
+
+This module exposes EcoPlots (sync) and AsyncEcoPlots (async) for discovering,
+filtering, previewing, and retrieving ecological plot data. Results can be
+returned as Pandas/GeoPandas objects or GeoJSON. Projects are saveable/loadable
+via .ecoproj files for reproducible workflows.
+
+Examples:
+```python
+# Synchronous
+ec = EcoPlots()
+ec.select(site_id="TCFTNS0002")
+gdf = ec.get_data()
+
+# Asynchronous
+aec = AsyncEcoPlots()
+aec.select(site_id="TCFTNS0002")
+gdf = await aec.get_data()
+```
+"""
+
 import asyncio
+from typing import Optional, Union
+
+import geopandas as gpd
 import orjson
 import pandas as pd
-import geopandas as gpd
-
 from diskcache import Cache
-from typing import Optional, Dict, Union
+
 from ._base import EcoPlotsBase
-from .config import CACHE_DIR
-from .utils import _run_sync
+from ._config import CACHE_DIR
 from ._flatten_response._streaming import _flatten_geojson
+from ._gui import spatial_selector
+from ._utils import _run_sync
+
 
 class EcoPlots(EcoPlotsBase):
     """High-level Python client for the EcoPlots REST API.
@@ -45,8 +69,8 @@ class EcoPlots(EcoPlotsBase):
         ``AsyncEcoPlots``: Async counterpart with the same surface area.
     """
 
-    def __init__(self, filterset: Optional[Dict] = None, query_filters: Optional[Dict] = None):
-        """Initialize the EcoPlots client with filters.
+    def __init__(self, filterset: Optional[dict] = None, query_filters: Optional[dict] = None):
+        """Initialise the EcoPlots client with filters.
 
         If no base filter is provided, it defaults to the one specified in the config.
 
@@ -54,18 +78,15 @@ class EcoPlots(EcoPlotsBase):
             filterset: Initial filter set. Defaults to None.
             query_filters: Initial query filters. Defaults to None.
         """
-        super().__init__(
-            filterset=filterset,
-            query_filters=query_filters
-        )
+        super().__init__(filterset=filterset, query_filters=query_filters)
 
-    
     def summary(self, dformat: Optional[str] = None) -> pd.DataFrame:
         """Summarize the EcoPlots data.
 
         Args:
-            dformat: The desired format for the summary. 
-                If "json", returns a JSON string. Defaults to None, which returns a Pandas DataFrame.
+            dformat: The desired format for the summary.
+                If "json", returns a JSON string. Defaults to None,
+                which returns a Pandas DataFrame.
 
         Returns:
             A DataFrame containing the summary of the EcoPlots data.
@@ -73,22 +94,17 @@ class EcoPlots(EcoPlotsBase):
         data = self.summarise_data()
         if dformat == "json":
             return orjson.dumps(data, option=orjson.OPT_INDENT_2)
-        
+
         pairs = {"total_doc": data["total_doc"], **data["unique_count"]}
-        df = (
-            pd.Series(pairs, name="count")
-                .rename_axis("metric")
-                .reset_index()
-        )
-        return df
 
+        return pd.Series(pairs, name="count").rename_axis("metric").reset_index()
 
-    def preview(self, dformat: Optional[str] = None) -> Union[gpd.GeoDataFrame, Dict]:
+    def preview(self, dformat: Optional[str] = None) -> Union[gpd.GeoDataFrame, dict]:
         """
         Fetch a small, first-page preview of EcoPlots data.
 
         Args:
-            dformat: Output format. 
+            dformat: Output format.
                 - If "geojson" or "json", returns a pretty-printed GeoJSON string.
                 - If "pandas" or "geopandas" (default), returns a GeoDataFrame.
 
@@ -109,7 +125,6 @@ class EcoPlots(EcoPlotsBase):
             )
         return _flatten_geojson(geojson_data)
 
-
     def get_datasources(self) -> pd.DataFrame:
         """Get the data sources available for applied filters.
 
@@ -118,7 +133,6 @@ class EcoPlots(EcoPlotsBase):
         """
         data = self.discover("dataset")
         return pd.DataFrame(data)
-    
 
     def get_datasources_attributes(self):
         """Get the attributes of data sources from the applied filters.
@@ -132,14 +146,13 @@ class EcoPlots(EcoPlotsBase):
         with Cache(CACHE_DIR) as cache:
             ds_map = cache.get("attributes", {}) or {}
             for uri in uris:
-                val = ds_map.get(uri, None)
+                val = ds_map.get(uri)
 
                 row = {"key": val, "uri": uri}
 
                 rows.append(row)
 
         return pd.DataFrame(rows)
-
 
     def get_sites(self) -> pd.DataFrame:
         """Get the sites from the applied filters.
@@ -149,8 +162,7 @@ class EcoPlots(EcoPlotsBase):
         """
         data = self.discover("site_id")
         return pd.DataFrame(data)
-    
-    
+
     def get_sites_attributes(self):
         """Get the attributes of sites from the applied filters.
 
@@ -163,14 +175,13 @@ class EcoPlots(EcoPlotsBase):
         with Cache(CACHE_DIR) as cache:
             site_map = cache.get("attributes", {}) or {}
             for uri in uris:
-                val = site_map.get(uri, None)
+                val = site_map.get(uri)
 
                 row = {"key": val, "uri": uri}
 
                 rows.append(row)
 
         return pd.DataFrame(rows)
-    
 
     def get_site_visit_attributes(self):
         """Get the attributes of site visits from the applied filters.
@@ -184,14 +195,13 @@ class EcoPlots(EcoPlotsBase):
         with Cache(CACHE_DIR) as cache:
             sv_map = cache.get("attributes", {}) or {}
             for uri in uris:
-                val = sv_map.get(uri, None)
+                val = sv_map.get(uri)
 
                 row = {"key": val, "uri": uri}
 
                 rows.append(row)
 
         return pd.DataFrame(rows)
-
 
     def get_region_types(self) -> pd.DataFrame:
         """Get the available region types from the applied filters.
@@ -201,7 +211,6 @@ class EcoPlots(EcoPlotsBase):
         """
         data = self.discover("region_type")
         return pd.DataFrame(data)
-    
 
     def get_regions(self, region_type: str) -> pd.DataFrame:
         """Get the available regions for a specific region type from the applied filters.
@@ -215,7 +224,6 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover("region", region_type=region_type)
         return pd.DataFrame(data)
 
-
     def get_feature_types(self) -> pd.DataFrame:
         """Get the feature types from the applied filters.
 
@@ -224,7 +232,6 @@ class EcoPlots(EcoPlotsBase):
         """
         data = self.discover("feature_type")
         return pd.DataFrame(data)
-    
 
     def get_observed_properties(self) -> pd.DataFrame:
         """Get the observed properties from the applied filters.
@@ -234,7 +241,6 @@ class EcoPlots(EcoPlotsBase):
         """
         data = self.discover("observed_property")
         return pd.DataFrame(data)
-    
 
     def get_observation_attributes(self) -> pd.DataFrame:
         """Get the attributes of observations from the applied filters.
@@ -245,28 +251,26 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover_attributes("observation")
         uris = data.get("observation_attributes", []) or []
         rows = []
-        with Cache(CACHE_DIR) as cache:   # or self.CACHE_DIR if that's how you store it
+        with Cache(CACHE_DIR) as cache:  # or self.CACHE_DIR if that's how you store it
             obs_map = cache.get("attributes", {}) or {}
             for uri in uris:
-                val = obs_map.get(uri, None)
+                val = obs_map.get(uri)
 
                 row = {"key": val, "uri": uri}
 
                 rows.append(row)
 
         return pd.DataFrame(rows)
-    
 
     def get_data(
-        self,
-        allow_full_download: Optional[bool] = False,
-        dformat: Optional[str] = None
+        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = None
     ) -> gpd.GeoDataFrame:
         """
         Retrieve EcoPlots data based on the current filters.
 
         Args:
-            allow_full_download: If True, allows downloading the full dataset without filters. Defaults to False.
+            allow_full_download: If True, allows downloading the full
+                dataset without filters. Defaults to False.
             dformat: Output format.
                 - "geojson" or "json": returns a pretty-printed GeoJSON string.
                 - "pandas" (or 'pd') or "geopandas" (or 'gpd') (default): returns a GeoDataFrame.
@@ -288,14 +292,25 @@ class EcoPlots(EcoPlotsBase):
 
         if dformat in ("geojson", "json"):
             return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
-        
+
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
             raise ValueError(
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
-        
+
         return _flatten_geojson(data)
+
+    def select_spatial(self, **kwargs):
+        """Open the spatial selection widget (optional extra).
+
+        Args:
+            **kwargs: Additional keyword arguments to pass to the widget.
+
+        Returns:
+            ipywidgets.VBox: The widget. Use it in a notebook cell to display.
+        """
+        return spatial_selector(self, **kwargs)
 
 
 class AsyncEcoPlots(EcoPlots):
@@ -322,30 +337,25 @@ class AsyncEcoPlots(EcoPlots):
           are set unless `allow_full_download=True`.
     """
 
-    def __init__(self, filterset: Optional[Dict] = None, query_filters: Optional[Dict] = None):
+    def __init__(self, filterset: Optional[dict] = None, query_filters: Optional[dict] = None):
         """Initialize the AsyncEcoPlots client with filters.
 
         If no base filter is provided, it defaults to the one specified in the config.
 
         Args:
-            filterset (Optional[Dict], optional): Initial filter set. Defaults to None.
-            query_filters (Optional[Dict], optional): Initial query filters. Defaults to None.
+            filterset: Initial filter set. Defaults to None.
+            query_filters: Initial query filters. Defaults to None.
         """
-        super().__init__(
-            filterset=filterset,
-            query_filters=query_filters
-        )
-
+        super().__init__(filterset=filterset, query_filters=query_filters)
 
     async def get_data(
-        self,
-        allow_full_download: Optional[bool] = False,
-        dformat: Optional[str] = None
+        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = None
     ) -> gpd.GeoDataFrame:
         """Retrieve EcoPlots data asynchronously based on the current filters.
 
         Args:
-            allow_full_download: If True, allows downloading the full dataset without filters. Defaults to False.
+            allow_full_download: If True, allows downloading the full
+                 dataset without filters. Defaults to False.
             dformat: Output format.
                 - "geojson" or "json": returns a pretty-printed GeoJSON string.
                 - "pandas" (or "pd") or "geopandas" (or "gpd") (default): returns a GeoDataFrame.
@@ -367,12 +377,11 @@ class AsyncEcoPlots(EcoPlots):
 
         if dformat in ("geojson", "json"):
             return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
-        
+
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
             raise ValueError(
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
 
-        gdf = asyncio.to_thread(_flatten_geojson, data)
-        return gdf
+        return asyncio.to_thread(_flatten_geojson, data)
