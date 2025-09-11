@@ -1,22 +1,36 @@
 """Provide synchronous and asynchronous clients for the EcoPlots REST API.
 
-This module exposes EcoPlots (sync) and AsyncEcoPlots (async) for discovering,
+This module exposes :class:`~terndata.ecoplots.ecoplots.EcoPlots` (sync) and
+:class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` (async) for discovering,
 filtering, previewing, and retrieving ecological plot data. Results can be
-returned as Pandas/GeoPandas objects or GeoJSON. Projects are saveable/loadable
-via .ecoproj files for reproducible workflows.
+returned as ``pandas.DataFrame``/``geopandas.GeoDataFrame`` or raw GeoJSON.
+Projects are saveable/loadable via ``.ecoproj`` files for reproducible workflows.
 
 Examples:
-```python
-# Synchronous
-ec = EcoPlots()
-ec.select(site_id="TCFTNS0002")
-gdf = ec.get_data()
+    Synchronous:
 
-# Asynchronous
-aec = AsyncEcoPlots()
-aec.select(site_id="TCFTNS0002")
-gdf = await aec.get_data()
-```
+    .. code-block:: python
+
+        from terndata.ecoplots import EcoPlots
+
+        ec = EcoPlots()
+        ec.select(site_id="TCFTNS0002")
+        gdf = ec.get_data()
+
+    Asynchronous:
+
+    .. code-block:: python
+
+        from terndata.ecoplots import AsyncEcoPlots
+
+        async def main():
+            aec = AsyncEcoPlots()
+            aec.select(site_id="TCFTNS0002")
+            gdf = await aec.get_data()
+            return gdf
+
+        # In a script: asyncio.run(main())
+        # In a notebook: await main()
 """
 
 import asyncio
@@ -48,25 +62,26 @@ class EcoPlots(EcoPlotsBase):
     Examples:
         Basic usage:
 
-        ```python
-        ecoplots = EcoPlots()
-        ecoplots.get_datasources().head()         # discover datasets
-        ecoplots.select(site_id="TCFTNS0002")     # add filters (validated & fuzzy-resolved)
-        ecoplots.preview().head()                 # quick look (first page)
-        df = ecoplots.get_data()                  # full pull as GeoDataFrame
-        ```
+        .. code-block:: python
+
+            from terndata.ecoplots import EcoPlots
+
+            ecoplots = EcoPlots()
+            ecoplots.get_datasources().head()         # discover datasets
+            ecoplots.select(site_id="TCFTNS0002")     # add filters (validated & fuzzy-resolved)
+            ecoplots.preview().head()                 # quick look (first page)
+            df = ecoplots.get_data()                  # full pull as GeoDataFrame
 
         Save / load a project:
 
-        ```python
-        path = ecoplots.save("myproject.ecoproj")
-        ecoplots2 = EcoPlots.load(path)
-        ecoplots2.get_filter("site_id")
-        ['TCFTNS0002']
-        ```
+        .. code-block:: python
+
+            path = ecoplots.save("myproject.ecoproj")
+            ecoplots2 = EcoPlots.load(path)
+            ecoplots2.get_filter("site_id")           # -> ['TCFTNS0002']
 
     See Also:
-        ``AsyncEcoPlots``: Async counterpart with the same surface area.
+        :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots`: Async counterpart with the same surface area.
     """
 
     def __init__(self, filterset: Optional[dict] = None, query_filters: Optional[dict] = None):
@@ -100,8 +115,7 @@ class EcoPlots(EcoPlotsBase):
         return pd.Series(pairs, name="count").rename_axis("metric").reset_index()
 
     def preview(self, dformat: Optional[str] = None) -> Union[gpd.GeoDataFrame, dict]:
-        """
-        Fetch a small, first-page preview of EcoPlots data.
+        """Fetch a small, first-page preview of EcoPlots data.
 
         Args:
             dformat: Output format.
@@ -134,7 +148,7 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover("dataset")
         return pd.DataFrame(data)
 
-    def get_datasources_attributes(self):
+    def get_datasources_attributes(self) -> pd.DataFrame:
         """Get the attributes of data sources from the applied filters.
 
         Returns:
@@ -163,7 +177,7 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover("site_id")
         return pd.DataFrame(data)
 
-    def get_sites_attributes(self):
+    def get_sites_attributes(self) -> pd.DataFrame:
         """Get the attributes of sites from the applied filters.
 
         Returns:
@@ -183,7 +197,7 @@ class EcoPlots(EcoPlotsBase):
 
         return pd.DataFrame(rows)
 
-    def get_site_visit_attributes(self):
+    def get_site_visit_attributes(self) -> pd.DataFrame:
         """Get the attributes of site visits from the applied filters.
 
         Returns:
@@ -265,8 +279,7 @@ class EcoPlots(EcoPlotsBase):
     def get_data(
         self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = None
     ) -> gpd.GeoDataFrame:
-        """
-        Retrieve EcoPlots data based on the current filters.
+        """Retrieve EcoPlots data based on the current filters.
 
         Args:
             allow_full_download: If True, allows downloading the full
@@ -302,7 +315,10 @@ class EcoPlots(EcoPlotsBase):
         return _flatten_geojson(data)
 
     def select_spatial(self, **kwargs):
-        """Open the spatial selection widget (optional extra).
+        """Open the spatial selection widget.
+
+        A minimal map based spatial selector, similar to spatial selection tool in
+        EcoPlots Portal.
 
         Args:
             **kwargs: Additional keyword arguments to pass to the widget.
@@ -314,8 +330,7 @@ class EcoPlots(EcoPlotsBase):
 
 
 class AsyncEcoPlots(EcoPlots):
-    """
-    High-level **async** client for the EcoPlots REST API.
+    """High-level **async** client for the EcoPlots REST API.
 
     Provides an awaitable `get_data()` for large/long-running fetches while
     reusing the synchronous ergonomics elsewhere. Ideal for web backends
@@ -324,11 +339,13 @@ class AsyncEcoPlots(EcoPlots):
     Examples:
         Basic async usage:
 
-        ```python
-        ec = AsyncEcoPlots()
-        ec.select(site_id="TCFTNS0002")    # selection etc. is sync but cheap
-        gdf = await ec.get_data()          # await the heavy network call
-        ```
+        .. code-block:: python
+
+            from terndata.ecoplots import AsyncEcoPlots
+
+            ec = AsyncEcoPlots()
+            ec.select(site_id="TCFTNS0002")    # selection etc. is sync but cheap
+            gdf = await ec.get_data()          # await the heavy network call
 
     Notes:
         - Only `get_data()` is async here. Other methods inherited from

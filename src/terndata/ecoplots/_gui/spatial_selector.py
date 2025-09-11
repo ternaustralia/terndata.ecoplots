@@ -1,5 +1,4 @@
-"""
-Spatial selector widget for EcoPlots.
+"""Spatial selector widget for EcoPlots.
 
 This module provides a Jupyter/ipywidgets-based map control that lets a user draw a
 rectangle or polygon and then preview/confirm a WKT spatial filter that is passed to

@@ -51,7 +51,7 @@ def resolve_region_type(
 ) -> Optional[str]:
     """Resolve a user-provided region type or URL to the closest allowed region type.
 
-    Parameters:
+    Args:
         user_input: The user input, which can be a region type label or a URL.
         allowed_region_types: List of allowed region type
             labels to match against. Defaults to REGION_TYPES.
@@ -268,8 +268,7 @@ def resolve_filter_values_to_urls(
 
 
 def validate_facet(facet, value) -> tuple:
-    """
-    Validate and resolve user-provided values for a given facet to their corresponding URLs.
+    """Validate and resolve user-provided values for a given facet to their corresponding URLs.
 
     Args:
         facet: The name of the facet to validate (e.g., a field or category).

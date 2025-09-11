@@ -590,7 +590,7 @@ class EcoPlotsBase:
 
         - If `path` is `None`: save as `./ecoplots_<UTCSTAMP>.ecoproj`.
         - If `path` has no `.ecoproj` suffix and no parent directory: save as
-        `./<name>.ecoproj` in the current working directory.
+            `./<name>.ecoproj` in the current working directory.
         - If `path` ends with `.ecoproj`: save exactly to that location.
 
         Args:
