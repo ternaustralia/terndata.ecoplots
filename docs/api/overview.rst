@@ -1,5 +1,5 @@
-EcoPlots package overview
-=========================
+Package Overview
+================
 
 .. automodule:: terndata.ecoplots
    :noindex:
