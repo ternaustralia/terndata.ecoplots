@@ -84,6 +84,21 @@ class EcoPlotsBase:
 
         Returns:
             True if both type and internal filter state match, False otherwise.
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                from terndata.ecoplots import EcoPlots
+
+                ec1 = EcoPlots()
+                ec1.select(site_id="TCFTNS0002")
+
+                ec2 = EcoPlots()
+                ec2.select(site_id="TCFTNS0002")
+
+                ec1 == ec2  # True
         """
         if type(self) is not type(other):  # noqa: PIE789
             return False
@@ -98,6 +113,20 @@ class EcoPlotsBase:
 
         Returns:
             True if both _filters and _query_filters are non-empty, False otherwise.
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                from terndata.ecoplots import EcoPlots
+
+                ec = EcoPlots()
+                bool(ec)  # False
+
+                ec.select(site_id="TCFTNS0002")
+                _ = ec.preview()           # or: _ = ec.get_data(); resolves query-side filters
+                bool(ec)  # True
         """
         return bool(self._filters) and bool(self._query_filters)
 
@@ -109,6 +138,17 @@ class EcoPlotsBase:
 
         Returns:
             Total number of selected filter values (int).
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                from terndata.ecoplots import EcoPlots
+
+                ec = EcoPlots()
+                ec.select(site_id=["TCFTNS0002"], dataset="TERN Surveillance")
+                len(ec)  # 2
         """
         return sum(len(v) for v in self._filters.values())
 
@@ -121,6 +161,19 @@ class EcoPlotsBase:
 
         Returns:
             A new instance (same type) with shallow-copied internal state.
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                import copy
+                from terndata.ecoplots import EcoPlots
+
+                ec1 = EcoPlots().select(site_id="TCFTNS0002")
+                ec2 = copy.copy(ec1)
+                ec1 is ec2        # False
+                ec1 == ec2        # True (same filter state)
         """
         return type(self)(
             filterset=copy.copy(self._filters),
@@ -138,6 +191,19 @@ class EcoPlotsBase:
 
         Returns:
             A new instance (same type) with deeply-copied internal state.
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                import copy
+                from terndata.ecoplots import EcoPlots
+
+                ec1 = EcoPlots().select(site_id=["TCFTNS0002", "TCFTNS0003"])
+                ec2 = copy.deepcopy(ec1)
+                ec1 is ec2        # False
+                ec1 == ec2        # True
         """
         return type(self)(
             filterset=copy.deepcopy(self._filters, memo),
@@ -160,6 +226,19 @@ class EcoPlotsBase:
 
         Raises:
             KeyError: If the provided facet name is not known.
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                ec = EcoPlots().select(site_id="TCFTNS0002")
+                _ = ec.preview()        # ensure resolution
+
+                "site_id" in ec  # True
+
+                # The following raises KeyError (unknown facet):
+                # "not_a_facet" in ec
         """
         if item not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{item}`. Allowed: " + ", ".join(QUERY_FACETS))
@@ -180,6 +259,16 @@ class EcoPlotsBase:
 
         Raises:
             KeyError: If facet is invalid or not present in current filters.
+        
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                from terndata.ecoplots import EcoPlots
+
+                ec = EcoPlots().select(site_id=["TCFTNS0002", "TCFTNS0003"])
+                ec["site_id"]  # ["TCFTNS0002", "TCFTNS0003"]
         """
         if item not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{item}`. Allowed: " + ", ".join(QUERY_FACETS))
@@ -200,6 +289,18 @@ class EcoPlotsBase:
 
         Raises:
             KeyError: If the facet is not allowed.
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                from terndata.ecoplots import EcoPlots
+
+                ec = EcoPlots()
+                ec["site_id"] = "TCFTNS0002"
+                ec["site_id"] = ["TCFTNS0002", "TCFTNS0003"]
+                ec["dataset"] = "TERN Surveillance"
         """
         if facet not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{facet}`. Allowed: " + ", ".join(QUERY_FACETS))
@@ -207,11 +308,6 @@ class EcoPlotsBase:
 
     def __delitem__(self, key) -> None:
         """Delete a facet or specific values from a facet (delegates to remove).
-
-        Two usages are supported:
-          - del ec['site_id']                       -> remove entire facet
-          - del ec['site_id', 'TCFTNS0002']         -> remove a single value
-          - del ec['site_id', ['A','B','C']]        -> remove multiple values
 
         The method validates provided facet names and delegates to remove(),
         raising appropriate errors for unknown facets or malformed keys.
@@ -221,6 +317,18 @@ class EcoPlotsBase:
 
         Raises:
             KeyError: If the facet is unknown or tuple form is malformed.
+
+        Examples:
+            Basic usage:
+
+            .. code-block:: python
+
+                from terndata.ecoplots import EcoPlots
+
+                ec = EcoPlots()
+                del ec['site_id']                       # remove entire facet
+                del ec['site_id', 'TCFTNS0002']         # remove a single value
+                del ec['site_id', ['A','B','C']]        # remove multiple values
         """
         if isinstance(key, tuple):
             if len(key) != 2:
@@ -409,7 +517,7 @@ class EcoPlotsBase:
                 f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
             )
 
-        return orjson.dumps(self._filters, option=orjson.OPT_INDENT_2).decode("utf-8")
+        return self._filters
 
     def get_api_query_filters(self, facet: str = None) -> Union[list, dict]:
         """Return the current query filters for ecoplots API for a specified facet or all facet.
@@ -432,7 +540,7 @@ class EcoPlotsBase:
                 f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
             )
 
-        return orjson.dumps(self._query_filters, option=orjson.OPT_INDENT_2).decode("utf-8")
+        return self._query_filters
 
     def discover(
         self,

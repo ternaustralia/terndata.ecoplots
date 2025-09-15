@@ -1,4 +1,4 @@
-import os, sys
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -27,7 +27,7 @@ html_theme = "furo"
 autosummary_generate = True
 autodoc_typehints = "description"
 autodoc_default_options = {"members": True, "undoc-members": False}
-# Google style; hide return **types**
+# Google style
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
 napoleon_use_param = True
@@ -40,10 +40,8 @@ napoleon_custom_sections = [
 ]
 
 autodoc_default_options = {
-    "members": True,
     "undoc-members": False,
     "private-members": False,     # don't show _private names
-    "special-members": False,     # don't show __dunder__ unless you want to
     "imported-members": False,    # don't show imported members
     "member-order": "bysource",
 }
@@ -67,3 +65,5 @@ autodoc_mock_imports = [
     "numpy",
     "pandas",
 ]
+
+exclude_patterns = ["api/modules.rst"]

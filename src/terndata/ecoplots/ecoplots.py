@@ -78,7 +78,7 @@ class EcoPlots(EcoPlotsBase):
 
             path = ecoplots.save("myproject.ecoproj")
             ecoplots2 = EcoPlots.load(path)
-            ecoplots2.get_filter("site_id")           # -> ['TCFTNS0002']
+            ecoplots2.get_filter("site_id")           # ['TCFTNS0002']
 
     See Also:
         :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots`: Async counterpart with the same surface area.

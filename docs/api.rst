@@ -1,9 +1,11 @@
 API Reference
 =============
 
-.. autosummary::
-   :toctree: _autosummary
-   :recursive:
+.. toctree::
+   :maxdepth: 2
 
-   terndata.ecoplots
+   api/overview
+   api/ecoplots_class
+   api/async_ecoplots_class
+
 
