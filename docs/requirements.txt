@@ -1,4 +1,3 @@
 sphinx
 myst-parser
 furo
-defusedxml >= 0.7.1, < 1.0.0
