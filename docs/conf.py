@@ -95,32 +95,3 @@ autodoc_mock_imports = [
 ]
 
 exclude_patterns = ["api/modules.rst"]
-
-
-# --- Recolour EcoPlots SVG at build time (secure defusedxml + forbid_* flags)
-from defusedxml import ElementTree as DET  # noqa: E402
-
-STATIC_IMG = Path(__file__).parent / "_static" / "img"
-
-def _recolor_svg(src: Path, dest: Path, *, fill: str | None = None, stroke: str | None = None) -> None:
-    tree = DET.parse(str(src), forbid_dtd=True, forbid_entities=True, forbid_external=True)
-    root = tree.getroot()
-    for el in root.iter():
-        if fill is not None:
-            # Respect explicit 'none' fills; otherwise set
-            current = el.get("fill")
-            if current not in ("none",):
-                el.set("fill", fill)
-        if stroke is not None and el.get("stroke"):
-            el.set("stroke", stroke)
-    dest.write_bytes(DET.tostring(root, encoding="utf-8"))
-
-def _ensure_brand_assets(_app) -> None:
-    base = STATIC_IMG / "ecoplots-logo-base.svg"
-    if base.exists():
-        _recolor_svg(base, STATIC_IMG / "ecoplots-logo-light.svg", fill="#6EB3A6")
-        _recolor_svg(base, STATIC_IMG / "ecoplots-logo-dark.svg",  fill="#B3D4C9")
-
-def setup(app):
-    # Generate recoloured logos before the builder scans files
-    app.connect("builder-inited", _ensure_brand_assets)

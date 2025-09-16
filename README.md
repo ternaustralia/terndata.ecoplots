@@ -1,19 +1,11 @@
-<p align="left">
-  <img src="docs/_static/img/ecoplots-logo-dark.svg" alt="EcoPlots logo" height="34" />
-  <span style="font-weight:800;font-size:2rem;vertical-align:middle;margin-left:8px;color:#F5A26C;">
-    EcoPlots Python Library
-  </span>
-</p>
+# EcoPlots Python Library
 
 [![PyPI](https://img.shields.io/pypi/v/terndata.ecoplots.svg?logo=pypi&logoColor=white)](https://pypi.org/project/terndata.ecoplots/)
 [![Python versions](https://img.shields.io/pypi/pyversions/terndata.ecoplots.svg?logo=python&logoColor=white)](https://pypi.org/project/terndata.ecoplots/)
 [![Docs](https://img.shields.io/readthedocs/terndata-ecoplots.svg?logo=readthedocs)](https://terndata-ecoplots.readthedocs.io/en/latest/)
 [![License](https://img.shields.io/github/license/ternaustralia/terndata.ecoplots.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-Repo-181717?logo=github&logoColor=white)](https://github.com/ternaustralia/terndata.ecoplots)
-<a href="https://ecoplots.tern.org.au" target="_blank" rel="noopener">
-  <img src="docs/_static/img/ecoplots-logo-dark.svg" alt="EcoPlots" height="20" style="vertical-align:middle;" />
-  <img src="https://img.shields.io/badge/EcoPlots-Portal-6EB3A6?labelColor=043E4F" alt="EcoPlots Portal badge" />
-</a>
+[![EcoPlots Portal](https://img.shields.io/badge/EcoPlots-Portal-6EB3A6?labelColor=043E4F)](https://ecoplots.tern.org.au)
 
 High-level Python clients for discovering, filtering, previewing, and retrieving
 ecological plot data from the **[TERN EcoPlots Portal](https://ecoplots.tern.org.au)**.

@@ -17,8 +17,6 @@
     color: #F5A26C;
 }
 
-[data-theme="dark"] .eco-hero__title { color: #FBC9A0; }
-
 /* Tagline */
 .eco-hero__tagline { margin: .25rem 0 1rem; max-width: 48rem; font-size: 1.05rem; }
 
