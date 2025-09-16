@@ -1,12 +1,21 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
-def _flatten_mapping(prefix: str, obj: Dict[str, Any], out: Dict[str, Any]) -> None:
-    """
-    Generic dict flattener. Produces dotted keys.
-    Special-cases common {value, unit, attribute} shapes:
-      prefix.key        -> value
-      prefix.key.unit   -> unit (if present)
-      prefix.key.attribute -> attribute (if present)
+
+def _flatten_mapping(prefix: str, obj: dict[str, Any], out: dict[str, Any]) -> None:
+    """Flatten a nested mapping into dotted keys.
+
+    Special-cases common `{value, unit, attribute}` shapes:
+      - `prefix.key` → value
+      - `prefix.key.unit` → unit (if present)
+      - `prefix.key.attribute` → attribute (if present)
+
+    Args:
+        prefix: Dotted path accumulated so far.
+        obj: Mapping to flatten.
+        out: Destination mapping to update in place.
+
+    Notes:
+        Intended for internal use only; mutates ``out``.
     """
     if not isinstance(obj, dict):
         return
@@ -24,15 +33,28 @@ def _flatten_mapping(prefix: str, obj: Dict[str, Any], out: Dict[str, Any]) -> N
         else:
             out[key] = v
 
-def _base_from_feature(feature: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
-    """
-    Extract feature-level context shared by all rows derived from this feature.
-    Returns (base_context, geometry_geojson).
+
+def _base_from_feature(feature: dict[str, Any]) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """Extract feature-level context and geometry.
+
+    Pulls dataset and site context into a flat dict and returns it with the
+    raw GeoJSON geometry.
+
+    Args:
+        feature: GeoJSON Feature mapping.
+
+    Returns:
+        tuple: ``(base_context, geometry_geojson)`` where:
+            - ``base_context`` is a flattened mapping of dataset/site fields.
+            - ``geometry_geojson`` is the raw geometry mapping or ``None``.
+
+    Notes:
+        Intended for internal use only.
     """
     props = feature.get("properties", {}) or {}
     geom = feature.get("geometry")
 
-    base: Dict[str, Any] = {}
+    base: dict[str, Any] = {}
     ds = props.get("dataset", {}) or {}
     base["dataset.title"] = ds.get("dataset.title")
     base["dataset.link"] = ds.get("dataset.link")
@@ -46,9 +68,28 @@ def _base_from_feature(feature: Dict[str, Any]) -> Tuple[Dict[str, Any], Optiona
     return base, geom
 
 
-def _rows_from_sitevisit_task(task: Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+def _rows_from_sitevisit_task(
+    task: tuple[dict[str, Any], dict[str, Any], Optional[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Expand a single site-visit task into observation rows.
+
+    Builds one or more row dictionaries by combining base context, a site visit,
+    features of interest, and observations. Geometry (if present) is attached
+    to each row.
+
+    Args:
+        task: A tuple ``(base_context, site_visit, geometry_geojson)`` produced
+            by ``_iter_sitevisit_tasks_from``.
+
+    Returns:
+        Row dictionaries ready for tabular assembly (each row describes
+        one observation or, if none exist, a context-only record).
+
+    Notes:
+        Intended for internal use only.
+    """
     base, sv, geom = task
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
 
     sv_base = dict(base)
     if sv:
