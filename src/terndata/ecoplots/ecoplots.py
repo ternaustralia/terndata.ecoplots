@@ -34,6 +34,7 @@ Examples:
 """
 
 import asyncio
+import io
 from typing import Optional, Union
 
 import geopandas as gpd
@@ -45,7 +46,11 @@ from ._base import EcoPlotsBase
 from ._config import CACHE_DIR
 from ._flatten_response._streaming import _flatten_geojson
 from ._gui import spatial_selector
-from ._utils import _run_sync
+from ._utils import (
+    _align_and_concat,
+    _run_sync,
+    _to_geopandas,
+)
 
 
 class EcoPlots(EcoPlotsBase):
@@ -277,7 +282,7 @@ class EcoPlots(EcoPlotsBase):
         return pd.DataFrame(rows)
 
     def get_data(
-        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = None
+        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
     ) -> gpd.GeoDataFrame:
         """Retrieve EcoPlots data based on the current filters.
 
@@ -286,7 +291,8 @@ class EcoPlots(EcoPlotsBase):
                 dataset without filters. Defaults to False.
             dformat: Output format.
                 - "geojson" or "json": returns a pretty-printed GeoJSON string.
-                - "pandas" (or 'pd') or "geopandas" (or 'gpd') (default): returns a GeoDataFrame.
+                - "pandas" (or 'pd'): returns a pandas DataFrame.
+                - "geopandas" (or 'gpd') (default): returns a GeoDataFrame.
 
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
@@ -301,18 +307,46 @@ class EcoPlots(EcoPlotsBase):
                 "can crash your environment. Proceed with caution!\n"
                 "If you are sure, call get_data(allow_full_download=True)."
             )
-        data = _run_sync(self.fetch_data())
 
         if dformat in ("geojson", "json"):
+            data = _run_sync(self.fetch_data())
             return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
-        if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
+        if dformat not in ("pandas", "geopandas", "pd", "gpd"):
             raise ValueError(
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
 
-        return _flatten_geojson(data)
+        feature_types_df = self.get_feature_types()
+
+        if "uri" not in feature_types_df.columns:
+            raise RuntimeError("No feature types found; cannot fetch data.")
+        
+        uris = (
+            feature_types_df["uri"]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
+
+        if not uris:
+            # No feature types found, so no data to fetch;
+            # return empty gdf
+            return gpd.GeoDataFrame()
+        
+        dfs = []
+        for uri in uris:
+            csv = _run_sync(self.fetch_data(dformat="csv", feature_type=[uri]))
+            df = pd.read_csv(io.StringIO(csv.decode("utf-8")))
+            dfs.append(df)
+
+        aligned_df = _align_and_concat(dfs)
+
+        if dformat in ("pandas", "pd"):
+            return aligned_df
+
+        return _to_geopandas(aligned_df)
 
     def select_spatial(self, **kwargs):
         """Open the spatial selection widget.
@@ -366,7 +400,7 @@ class AsyncEcoPlots(EcoPlots):
         super().__init__(filterset=filterset, query_filters=query_filters)
 
     async def get_data(
-        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = None
+        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
     ) -> gpd.GeoDataFrame:
         """Retrieve EcoPlots data asynchronously based on the current filters.
 
@@ -375,7 +409,8 @@ class AsyncEcoPlots(EcoPlots):
                  dataset without filters. Defaults to False.
             dformat: Output format.
                 - "geojson" or "json": returns a pretty-printed GeoJSON string.
-                - "pandas" (or "pd") or "geopandas" (or "gpd") (default): returns a GeoDataFrame.
+                - "pandas" (or "pd"): returns a pandas DataFrame.
+                - "geopandas" (or "gpd") (default): returns a GeoDataFrame.
 
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
@@ -390,9 +425,9 @@ class AsyncEcoPlots(EcoPlots):
                 "can crash your environment. Proceed with caution!\n"
                 "If you are sure, call get_data(allow_full_download=True)."
             )
-        data = await self.fetch_data()
 
         if dformat in ("geojson", "json"):
+            data = await self.fetch_data()
             return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
@@ -400,5 +435,36 @@ class AsyncEcoPlots(EcoPlots):
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
+        
+        # for pandas/geopandas output, we request one csv per feature type and merge
+        feature_types_df = self.get_feature_types()
 
-        return asyncio.to_thread(_flatten_geojson, data)
+        if "uri" not in feature_types_df.columns:
+            raise RuntimeError("No feature types found; cannot fetch data.")
+        uris = (
+            feature_types_df["uri"]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
+
+        if not uris:
+            # No feature types found, so no data to fetch;
+            # return empty gdf
+            return gpd.GeoDataFrame()
+        
+        tasks = [self.fetch_data(dformat="csv", feature_type=[uri]) for uri in uris]
+        csv_payloads = await asyncio.gather(*tasks, return_exceptions=True)
+
+        dfs = []
+        for csv in csv_payloads:
+            df = pd.read_csv(io.StringIO(csv.decode("utf-8")))
+            dfs.append(df)
+
+        aligned_df = _align_and_concat(dfs)
+
+        if dformat in ("pandas", "pd"):
+            return aligned_df
+
+        return _to_geopandas(aligned_df)
+

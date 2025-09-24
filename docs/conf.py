@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Make src/ importable on RTD/local
@@ -12,9 +12,9 @@ project = "terndata.ecoplots"
 author = "Avinash Chandra"
 
 START_YEAR = 2025
-YEAR = datetime.now().year
-years = f"{START_YEAR}–{YEAR}" if YEAR > START_YEAR else f"{YEAR}"
-copyright = f"{years}, TDSA (TERN Data Services and Analytics)"
+YEAR = datetime.now(timezone.utc).year
+years = f"{START_YEAR}-{YEAR}" if YEAR > START_YEAR else f"{YEAR}"
+copyright = f"{years}, TDSA (TERN Data Services and Analytics)"  # noqa: A001
 release = "0.1.0"
 
 extensions = [
@@ -23,7 +23,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "myst_parser",
-    "sphinx.ext.githubpages", # needed for GitHub Pages
+    "sphinx.ext.githubpages",  # needed for GitHub Pages
 ]
 
 html_theme = "furo"
@@ -39,7 +39,6 @@ html_theme_options = {
     "light_logo": "img/TERN-logo-primary.png",
     "dark_logo": "img/TERN-logo-reversed.png",
     "sidebar_hide_name": True,
-    
     "light_css_variables": {
         "color-brand-primary": "#00565D",
         "color-brand-content": "#00565D",
@@ -69,8 +68,8 @@ napoleon_custom_sections = [
 
 autodoc_default_options = {
     "undoc-members": False,
-    "private-members": False,     # don't show _private names
-    "imported-members": False,    # don't show imported members
+    "private-members": False,  # don't show _private names
+    "imported-members": False,  # don't show imported members
     "member-order": "bysource",
 }
 

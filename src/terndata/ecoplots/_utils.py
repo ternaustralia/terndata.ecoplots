@@ -7,7 +7,9 @@ from typing import Any, TypeVar
 
 import aiohttp
 import diskcache
+import geopandas as gpd
 import orjson
+import pandas as pd
 
 from ._config import (
     API_BASE_URL,
@@ -306,3 +308,60 @@ def _ensure_ecoproj_path(path: str | Path | None) -> Path:
         p = (Path.cwd() / p.name) if p.parent == Path(p.name).parent else p  # name-only goes to CWD
         p = p.with_suffix(".ecoproj")
     return p  # noqa: R504
+
+
+def _align_and_concat(dfs: list[pd.DataFrame]) -> pd.DataFrame:
+    """Align columns of multiple DataFrames and concatenate them.
+
+    Ensures that all input DataFrames have the same columns in the same order,
+    filling missing columns with "N/A" before concatenation.
+
+    Args:
+        dfs: List of pandas DataFrames to align and concatenate.
+
+    Returns:
+        A single DataFrame with aligned columns and concatenated rows.
+
+    Notes:
+        - Intended for internal use only.
+    """
+    if not dfs:
+        return pd.DataFrame()
+    all_cols, seen = [], set()
+    for df in dfs:
+        for c in df.columns:
+            if c not in seen:
+                seen.add(c)
+                all_cols.append(c)
+    aligned = [df.reindex(columns=all_cols) for df in dfs]
+    out = pd.concat(aligned, ignore_index=True)
+    return out.fillna("N/A")
+
+
+def _to_geopandas(df: pd.DataFrame) -> gpd.GeoDataFrame:
+    """Convert a DataFrame to a GeoDataFrame if possible.
+
+    If the DataFrame contains 'longitude_Degree' and 'latitude_Degree' columns,
+    these are used to create Point geometries. If not, a GeoDataFrame with
+    null geometries is returned.
+
+    Args:
+        df: Input pandas DataFrame
+
+    Returns:
+        A GeoDataFrame with Point geometries if coordinates are present; otherwise
+        a GeoDataFrame with null geometries.
+
+    Notes:
+        - Intended for internal use only.
+    """
+    if {"longitude_Degree", "latitude_Degree"} <= set(df.columns):
+        return gpd.GeoDataFrame(
+            df,
+            geometry=gpd.points_from_xy(
+                pd.to_numeric(df["longitude_Degree"], errors="coerce"),
+                pd.to_numeric(df["latitude_Degree"], errors="coerce"),
+                crs="EPSG:4326",
+            ),
+        )
+    return gpd.GeoDataFrame(df, geometry=[None] * len(df), crs="EPSG:4326")

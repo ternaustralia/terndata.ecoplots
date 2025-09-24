@@ -259,7 +259,7 @@ class EcoPlotsBase:
 
         Raises:
             KeyError: If facet is invalid or not present in current filters.
-        
+
         Examples:
             Basic usage:
 
@@ -585,6 +585,8 @@ class EcoPlotsBase:
         self,
         page_number: Optional[int] = None,
         page_size: Optional[int] = None,
+        dformat: str = "geojson",
+        **extras,
     ) -> dict:
         """Fetch data for the current query, optionally paginated.
 
@@ -593,34 +595,46 @@ class EcoPlotsBase:
         Args:
             page_number: Page index to request. Must be provided together with ``page_size``.
             page_size: Number of items per page. Must be provided together with ``page_number``.
+            dformat: Output format, either "geojson" (default) or "csv".
+            **extras: Additional query filters to merge into the current query
 
         Returns:
             Parsed JSON payload (GeoJSON) returned by the data endpoint.
+
+        Raises:
+            ValueError: If an invalid dformat is provided.
 
         Notes:
             - Timeout is 60s when pagination is used; otherwise 300s.
             - Intended for internal use only.
         """
+        if dformat not in ("geojson", "csv"):
+            raise ValueError("dformat must be one of 'geojson' or 'csv'")
 
         payload = {
             "query": copy.deepcopy(self._query_filters),
-            # "page_number": page_number,
-            # "page_size": page_size
+            "page_number": page_number,
+            "page_size": page_size,
         }
+
+        if extras:
+            payload["query"].update(extras)
 
         if page_number and page_size:
             payload.update({"page_number": page_number, "page_size": page_size})
             timeout = aiohttp.ClientTimeout(total=60)
         else:
+            del payload["page_number"]
+            del payload["page_size"]
             timeout = aiohttp.ClientTimeout(total=300)
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
-                f"{self._base_url}/api/v1.0/data?dformat=geojson", json=payload
+                f"{self._base_url}/api/v1.0/data?dformat={dformat}", json=payload
             ) as resp:
                 resp.raise_for_status()
                 data = await resp.read()
-                return orjson.loads(data)
+                return data if dformat == "csv" else orjson.loads(data)
 
     def discover_attributes(
         self,
