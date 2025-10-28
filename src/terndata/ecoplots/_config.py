@@ -1,16 +1,18 @@
 import os
 import tempfile
+
 # Default configuration
 
-# API_BASE_URL = "https://ecoplots-test.tern.org.au"
-API_BASE_URL = "http://localhost:8000"
+VERSION = "0.0.2"
 
-ELASTICSEARCH_URL="https://es-test.tern.org.au"
-ELASTICSEARCH_INDEX_SITEVISIT = "plotdata_ecoplots-sites"
-ELASTICSEARCH_INDEX_DATA = "plotdata_ecoplots-data"
-ELASTICSEARCH_INDEX_LABELS = "plotdata_ecoplots-labels"
+API_BASE_URL = "https://ecoplots.tern.org.au" if (
+        os.getenv("ECOPLOTS_ENV") == "dev"
+    ) else "https://ecoplots-test.tern.org.au"
+
 CACHE_EXPIRE_SECONDS = 60 * 60 * 24 * 14  # Default cache expiration time: 14 days
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "ecoplots_labels_cache")
+
+MAGIC = b"ECPJ"
 
 VOCAB_FACETS = [
     "region_type",

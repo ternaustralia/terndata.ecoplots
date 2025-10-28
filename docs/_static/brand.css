@@ -1,0 +1,78 @@
+/* Sidebar logo size */
+.sidebar-logo { max-height: 150px; width: auto; }
+.sidebar-brand { padding-top: .25rem; padding-bottom: .5rem; }
+
+/* Hero layout */
+.eco-hero { margin: 1.25rem 0 1.75rem; }
+.eco-left { text-align: left; }
+.eco-hero__brand { display: flex; gap: .6rem; margin-bottom: .25rem; align-items: center; }
+.eco-hero__logo { height: 56px; width: auto; margin-bottom: .25rem; }
+
+/* Title */
+.eco-hero__title {
+    font-weight: 800;
+    font-size: 3rem;
+    letter-spacing: .2px;
+    line-height: 1.1;
+    color: #F5A26C;
+}
+
+/* Tagline */
+.eco-hero__tagline { margin: .25rem 0 1rem; max-width: 48rem; font-size: 1.05rem; }
+
+/* Buttons */
+.eco-btn {
+  display: inline-block;
+  padding: .5rem .9rem;
+  border-radius: .5rem;
+  text-decoration: none;
+  border: 1px solid var(--color-brand-primary);
+  margin-right: .5rem;
+  font-weight: 600;
+}
+.eco-btn--primary {
+    background: #00565D;
+    border-color: #00565D;
+    color: #fff;
+}
+.eco-btn--primary:visited { color: #fff; }
+.eco-btn--primary:hover {
+    background: #B3D4C9;
+    color: #00565D;
+}
+
+.eco-btn--outline {
+    background: transparent;
+    border-color: #ED694B;
+    color: #ED694B;
+}
+.eco-btn--outline:visited { color: #ED694B; }
+.eco-btn--outline:hover { background: rgba(237, 105, 75, 0.10); color: #ED694B; }
+
+/* Badges */
+.eco-badges { display: flex; gap: .5rem; margin-top: .25rem; }
+.eco-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .3rem .55rem;
+  border: 1px solid var(--color-background-border);
+  border-radius: .5rem;
+  text-decoration: none;
+  color: var(--color-foreground-primary);
+  background: var(--color-background-primary);
+}
+.eco-badge:visited { color: var(--color-foreground-primary); }
+.eco-badge:hover { background: var(--color-background-secondary); }
+.eco-badge img { height: 16px; width: auto; }
+
+/* Light/dark logo swap */
+.only-dark  { display: none; }
+[data-theme="dark"] .only-light { display: none; }
+[data-theme="dark"] .only-dark  { display: inline-block; }
+
+/* Responsive tweak */
+@media (max-width: 700px) {
+  .eco-hero__logo { height: 44px; }
+  .eco-hero__title { font-size: 1.6rem; }
+}

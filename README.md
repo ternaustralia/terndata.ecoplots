@@ -1,48 +1,105 @@
-# terndata.ecoplots
+# EcoPlots Python Library
 
-This is a Python package to access the TERN EcoPlots data.
+[![PyPI](https://img.shields.io/pypi/v/terndata.ecoplots.svg?logo=pypi&logoColor=white)](https://pypi.org/project/terndata.ecoplots/)
+[![Python versions](https://img.shields.io/pypi/pyversions/terndata.ecoplots.svg?logo=python&logoColor=white)](https://pypi.org/project/terndata.ecoplots/)
+[![Docs](https://img.shields.io/readthedocs/terndata-ecoplots.svg?logo=readthedocs)](https://terndata-ecoplots.readthedocs.io/en/latest/)
+[![License](https://img.shields.io/github/license/ternaustralia/terndata.ecoplots.svg)](LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-Repo-181717?logo=github&logoColor=white)](https://github.com/ternaustralia/terndata.ecoplots)
+[![EcoPlots Portal](https://img.shields.io/badge/EcoPlots-Portal-6EB3A6?labelColor=043E4F)](https://ecoplots.tern.org.au)
 
-### Build
-Buid the package wheel locally (docker required):
-    
-    make build
+High-level Python clients for discovering, filtering, previewing, and retrieving
+ecological plot data from the **[TERN EcoPlots Portal](https://ecoplots.tern.org.au)**.
+Returns tidy structures for analysis (`pandas.DataFrame`, `geopandas.GeoDataFrame`)
+or raw `GeoJSON`.
 
-Build the API documentation:
+---
 
-    make doc
+## Features
 
-To run unittests:
+- 🔎 Discover datasets with validated, human-friendly filters  
+- ⚡ Preview result pages before full downloads  
+- 🗺️ Spatial selection (GeoJSON/WKT)  
+- 🧭 Two clients: synchronous `EcoPlots` and asynchronous `AsyncEcoPlots`  
+- 💾 Save / load projects via `.ecoproj` for reproducible workflows
 
-    make test
+**Documentation:** https://terndata-ecoplots.readthedocs.io
 
+---
 
-### Installation
-Install from pypi:
+## Installation
 
     pip install terndata.ecoplots
 
+Supported Python: 3.10+
 
-### API Methods
-See the [API documentation](https://terndata-ecoplots.readthedocs.io).
+---
 
-### Getting started
-The following examples are provided to help you get started:
+## Quick start
 
-```python
-    import terndata.ecoplots as plot 
- 
-```
+    from terndata.ecoplots import EcoPlots
 
-### Dependencies
-* packaging
-* numpy
-* pandas
-* requests
+    ec = EcoPlots()
+    ec.select(site_id="TCFTNS0002")    # add validated filters
+    preview = ec.preview().head()      # quick look (first page)
+    gdf = ec.get_data()                # full pull (GeoDataFrame)
 
+### Async
 
-### Who do I talk to?
+    import asyncio
+    from terndata.ecoplots import AsyncEcoPlots
 
-* please contact esupport@tern.org.au for any issues in the repository
+    async def main():
+        ec = AsyncEcoPlots()
+        ec.select(site_id="TCFTNS0002")
+        gdf = await ec.get_data()
+        return gdf
 
-### How to cite
-Terrestrial Ecosystem Research Network (2025). terndata.ecoplots: A Python package for Accessing TERN EcoPlots data. https://pypi.org/project/terndata.ecoplots/
+    # asyncio.run(main())
+
+---
+
+## Links
+
+- 📚 Docs (latest): https://terndata-ecoplots.readthedocs.io/en/latest/
+- 🧭 EcoPlots Portal: https://ecoplots.tern.org.au
+- 🧑‍💻 Source: https://github.com/ternaustralia/terndata.ecoplots
+- 📦 PyPI: https://pypi.org/project/terndata.ecoplots/
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome—please open an issue to discuss substantial changes.
+
+Build docs locally:
+
+    pip install -r docs/requirements.txt
+    make -C docs html
+
+Run tests:
+
+    make test
+
+Build wheels locally:
+
+    make build
+
+---
+
+## Support
+
+For questions or issues, email **esupport@tern.org.au**.
+
+---
+
+## Citation
+
+Terrestrial Ecosystem Research Network (2025). *terndata.ecoplots: A Python package for accessing TERN EcoPlots data*. https://pypi.org/project/terndata.ecoplots/
+
+---
+
+## License
+
+Licensed under the terms in [LICENSE](LICENSE).  
+Copyright © 2025 **TDSA (TERN Data Services and Analytics)**.
+Author: Avinash Chandra.
