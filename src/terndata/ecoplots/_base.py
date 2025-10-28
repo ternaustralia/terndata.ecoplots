@@ -605,7 +605,7 @@ class EcoPlotsBase:
             ValueError: If an invalid dformat is provided.
 
         Notes:
-            - Timeout is 60s when pagination is used; otherwise 300s.
+            - Timeout is 60s when pagination is used; otherwise 3000s.
             - Intended for internal use only.
         """
         if dformat not in ("geojson", "csv"):
@@ -626,7 +626,7 @@ class EcoPlotsBase:
         else:
             del payload["page_number"]
             del payload["page_size"]
-            timeout = aiohttp.ClientTimeout(total=300)
+            timeout = aiohttp.ClientTimeout(total=3000)
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
