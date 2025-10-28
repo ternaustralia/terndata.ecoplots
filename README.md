@@ -62,7 +62,7 @@ Supported Python: 3.10+
 
 - 📚 Docs (latest): https://terndata-ecoplots.readthedocs.io/en/latest/
 - 🧭 EcoPlots Portal: https://ecoplots.tern.org.au
-- 🧑‍💻 Source: https://github.com/TERNData/terndata.ecoplots
+- 🧑‍💻 Source: https://github.com/ternaustralia/terndata.ecoplots
 - 📦 PyPI: https://pypi.org/project/terndata.ecoplots/
 
 ---
