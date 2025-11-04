@@ -304,7 +304,7 @@ class EcoPlotsBase:
         """
         if facet not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{facet}`. Allowed: " + ", ".join(QUERY_FACETS))
-        self.select(facet, values)
+        self.select(filters={facet: values})
 
     def __delitem__(self, key) -> None:
         """Delete a facet or specific values from a facet (delegates to remove).
@@ -338,13 +338,13 @@ class EcoPlotsBase:
             if facet not in QUERY_FACETS:
                 raise KeyError(f"Unknown facet {facet!r}. Allowed: {', '.join(QUERY_FACETS)}")
             # Delegate; remove() expects canonical keys, same as select()
-            self.remove(**{facet: values})
+            self.remove(filters={facet: values})
         else:
             if key not in QUERY_FACETS:
                 raise KeyError(f"Unknown facet {key!r}. Allowed: {', '.join(QUERY_FACETS)}")
-            self.remove(**{key: None})
+            self.remove(filters={key: None})
 
-    def select(self, filters: Optional[dict] = None, **kwargs) -> SelfType:
+    def select(self: SelfType, filters: Optional[dict] = None, **kwargs) -> SelfType:
         """Add/merge filters and validate them.
 
         Accepts either a dict or keyword arguments.
@@ -404,7 +404,7 @@ class EcoPlotsBase:
 
         return self
 
-    def remove(self, filters: Optional[dict] = None, **kwargs) -> SelfType:
+    def remove(self: SelfType, filters: Optional[dict] = None, **kwargs) -> SelfType:
         """Remove whole facets or specific values (same ergonomics as ``select``).
 
         Accepts either a dict or keyword arguments. For each facet:
@@ -484,7 +484,7 @@ class EcoPlotsBase:
 
         return self
 
-    def clear(self) -> SelfType:
+    def clear(self: SelfType) -> SelfType:
         """Clear all filters from the instance.
 
         The method mutates the instance and returns it to allow fluent/chained calls.
@@ -496,7 +496,7 @@ class EcoPlotsBase:
         self._query_filters = {}
         return self
 
-    def get_filter(self, facet: Optional[str] = None) -> Union[list, dict]:
+    def get_filter(self, facet: Optional[str] = None) -> Union[list, dict, None]:
         """Return the current filter values for a specific facet or all applied filters.
 
         Args:
@@ -519,7 +519,7 @@ class EcoPlotsBase:
 
         return self._filters
 
-    def get_api_query_filters(self, facet: str = None) -> Union[list, dict]:
+    def get_api_query_filters(self, facet: Optional[str] = None) -> Union[list, dict, None]:
         """Return the current query filters for ecoplots API for a specified facet or all facet.
 
         Args:
@@ -617,7 +617,7 @@ class EcoPlotsBase:
             "page_size": page_size,
         }
 
-        if extras:
+        if extras and isinstance(payload["query"], dict):
             payload["query"].update(extras)
 
         if page_number and page_size:
@@ -813,7 +813,7 @@ class EcoPlotsBase:
         """
 
         query_filters = copy.deepcopy(self._query_filters)
-        all_unmatched = {}
+        all_unmatched: dict = {}
         all_matched = copy.deepcopy(self._filters)
 
         if "spatial" in all_matched:

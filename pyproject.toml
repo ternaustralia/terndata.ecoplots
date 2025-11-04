@@ -54,13 +54,20 @@ junit_family = "xunit2"
 pythonpath = [
     ".", "src"
 ]
+addopts = "-ra --ignore-golb=**/versions.py"
+norecursedirs = [".tox", ".venv", "build", "dist"]
 
 [tool.mypy]
 disable_error_code = ["import-untyped"]
+exclude = "(^src/.*/version\\.py$)|(^\\.tox/)|(^\\.venv/)|(^build/)|(^dist/)"
+
+[[tool.mypy.overrides]]
+module = ["aiohttp", "ipyleaflet"]
+ignore_missing_imports = true
 
 [tool.coverage.run]
 source_pkgs = ["terndata.ecoplots"]
-omit = ["tests/"]
+omit = ["tests/", "**/version.py"]
 
 [tool.black]
 line-length = 100
@@ -105,3 +112,4 @@ extend-ignore = [
     "DAR201", # no return in docstring
     "A003", # allow builtins (esp. 'id' as class attribute)
 ]
+exclude = ".tox,.venv,build,dist,__pycache__,src/terndata/ecoplots/version.py"

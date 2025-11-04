@@ -40,7 +40,10 @@ def resolve_facet(user_input: str, allowed_facets: list, threshold: int = 70) ->
     """
     # Normalize user input
     cleaned_input = user_input.strip().replace(" ", "_").lower()
-    match, score, _ = process.extractOne(cleaned_input, allowed_facets, scorer=fuzz.QRatio)
+    result = process.extractOne(cleaned_input, allowed_facets, scorer=fuzz.QRatio)  # type: ignore
+    if result is None:
+        return None
+    match, score, _ = result
     if score >= threshold:
         return match
     return None
@@ -75,17 +78,27 @@ def resolve_region_type(
             return next(k for k, v in REGION_TYPES_MAP.items() if v == user_input)
 
         # Fuzzy match against known URLs
-        best_url, score, _ = process.extractOne(user_input, REGION_URLS, scorer=fuzz.QRatio)
-        if score >= threshold:
-            # Auto-correct but warn user
-            warnings.warn(
-                f"Input URL '{user_input}' corrected to '{best_url}'.",
-                UserWarning,
-                stacklevel=3,
-            )
-            return next(k for k, v in REGION_TYPES_MAP.items() if v == best_url)
+        result = process.extractOne(user_input, REGION_URLS, scorer=fuzz.QRatio)  # type: ignore
+        if result is None:
+            pass  # fall through to next
+        else:
+            best_url, score, _ = result
+            if score >= threshold:
+                # Auto-correct but warn user
+                warnings.warn(
+                    f"Input URL '{user_input}' corrected to '{best_url}'.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return next(k for k, v in REGION_TYPES_MAP.items() if v == best_url)
         # Suggest but don't auto-correct
-        best_url, score, _ = process.extractOne(user_input, REGION_URLS, scorer=fuzz.QRatio)
+        result = process.extractOne(user_input, REGION_URLS, scorer=fuzz.QRatio)  # type: ignore
+        if result is None:
+            raise ValueError(
+                f"Unrecognized URL '{user_input}'. "
+                f"No close matches found. Allowed URLs: {', '.join(REGION_URLS)}."
+            )
+        best_url, score, _ = result
         if score >= 20:
             raise ValueError(f"Unrecognized URL '{user_input}'. " f"Did you mean '{best_url}'?")
         raise ValueError(
@@ -101,8 +114,9 @@ def resolve_region_type(
     cleaned_input = user_input.strip().replace(" ", "-").lower()
     if cleaned_input.startswith("l"):
         threshold = 20
-    match, score, _ = process.extractOne(cleaned_input, allowed_region_types, scorer=fuzz.QRatio)
-    if match:
+    result = process.extractOne(cleaned_input, allowed_region_types, scorer=fuzz.QRatio)  # type: ignore
+    if result is not None:
+        match, score, _ = result
         if score >= threshold:
             return match
 
@@ -145,16 +159,18 @@ def resolve_single_input(candidate: str, labels_dict: dict[str, str], threshold:
             return candidate
 
         # Fuzzy URL correction
-        best_uri, score, _ = process.extractOne(candidate, uris, scorer=fuzz.QRatio)
-        if score >= threshold:
-            warnings.warn(
-                f"Input URL '{candidate}' corrected to '{best_uri}').",
-                UserWarning,
-                stacklevel=3,
-            )
-            return best_uri
+        result = process.extractOne(candidate, uris, scorer=fuzz.QRatio)  # type: ignore
+        if result is not None:
+            best_uri, score, _ = result
+            if score >= threshold:
+                warnings.warn(
+                    f"Input URL '{candidate}' corrected to '{best_uri}').",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                return best_uri
 
-        raise ValueError(f"Unrecognized URL '{candidate}'. Did you mean: '{best_uri}'?")
+        raise ValueError(f"Unrecognized URL '{candidate}'.")
 
     # --- Case 2: Input is a name ---
     if candidate in names:
@@ -163,22 +179,24 @@ def resolve_single_input(candidate: str, labels_dict: dict[str, str], threshold:
                 return uri
 
     # Fuzzy match against names
-    best_name, score, _ = process.extractOne(candidate, names, scorer=fuzz.QRatio)
-    if score >= threshold:
-        if score < 100:
-            warnings.warn(
-                f"Input '{candidate}' resolved to '{best_name}'.",
-                UserWarning,
-                stacklevel=3,
-            )
-        # Best URI for the resolved name
-        return next(uri for uri, lbl in labels_dict.items() if lbl == best_name)
+    result = process.extractOne(candidate, names, scorer=fuzz.QRatio)
+    if result is not None:
+        best_name, score, _ = result
+        if score >= threshold:
+            if score < 100:
+                warnings.warn(
+                    f"Input '{candidate}' resolved to '{best_name}'.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+            # Best URI for the resolved name
+            return next(uri for uri, lbl in labels_dict.items() if lbl == best_name)
 
-    raise ValueError(f"Unrecognized value '{candidate}'. Did you mean '{best_name}'?")
+    raise ValueError(f"Unrecognized value '{candidate}'.")
 
 
 async def resolve_facet_inputs(
-    facet: str, user_values: list[str], region_type: str = None
+    facet: str, user_values: list[str], region_type: Optional[str] = None
 ) -> list[str]:
     """Resolve all user inputs for a facet to canonical URLs.
 
@@ -249,18 +267,21 @@ def resolve_filter_values_to_urls(
             matched.add(candidate)
             continue
         # Fuzzy label match
-        best_name, score, _ = process.extractOne(candidate, names, scorer=fuzz.QRatio)
-        if score >= threshold:
-            best_uri = next(u for u, n in labels_dict.items() if n == best_name)
-            warnings.warn(
-                f"Value '{candidate}' for facet '{facet}' corrected to '{best_name}'.",
-                UserWarning,
-                stacklevel=3,
-            )
-            resolved.add(best_uri)
-            matched.add(best_name)
-            corrected.add(candidate)
-        # No match found
+        result = process.extractOne(candidate, names, scorer=fuzz.QRatio)  # type: ignore
+        if result is not None:
+            best_name, score, _ = result
+            if score >= threshold:
+                best_uri = next(u for u, n in labels_dict.items() if n == best_name)
+                warnings.warn(
+                    f"Value '{candidate}' for facet '{facet}' corrected to '{best_name}'.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                resolved.add(best_uri)
+                matched.add(best_name)
+                corrected.add(candidate)
+            else:
+                unmatched.add(candidate)
         else:
             unmatched.add(candidate)
 
@@ -287,7 +308,7 @@ def validate_facet(facet, value) -> tuple:
 
     """
     labels_dict = _get_cached_labels(facet)
-    user_values = value if isinstance(value, (list, tuple)) else [value]
+    user_values = list(value) if isinstance(value, (list, tuple)) else [value]
     urls, matched, unmatched, corrected = resolve_filter_values_to_urls(
         facet, user_values, labels_dict
     )

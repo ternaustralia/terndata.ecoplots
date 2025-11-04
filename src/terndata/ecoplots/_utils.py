@@ -3,7 +3,7 @@ import re
 from collections.abc import Coroutine
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 import aiohttp
 import diskcache
@@ -125,14 +125,14 @@ def _run_sync(coro: Coroutine[Any, Any, _T]) -> _T:
         loop = None
     if loop and loop.is_running():
         # Jupyter/IPython or already running event loop
-        import nest_asyncio
+        import nest_asyncio  # type: ignore
 
         nest_asyncio.apply()
         return loop.run_until_complete(coro)
     return asyncio.run(coro)
 
 
-def _get_cached_labels(facet: str = None) -> dict:
+def _get_cached_labels(facet: Optional[str] = None) -> dict:
     """Return cached labels for a single facet.
 
     Looks up labels in the on-disk cache and returns the cached value for the
