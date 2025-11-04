@@ -431,6 +431,38 @@ class AsyncEcoPlots(EcoPlots):
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
+        
+        # for pandas/geopandas output, we request one csv per feature type and merge
+        feature_types_df = self.get_feature_types()
+
+        if "uri" not in feature_types_df.columns:
+            raise RuntimeError("No feature types found; cannot fetch data.")
+        uris = (
+            feature_types_df["uri"]
+            .dropna()
+            .astype(str)
+            .tolist()
+        )
+
+        if not uris:
+            # No feature types found, so no data to fetch;
+            # return empty gdf
+            return gpd.GeoDataFrame()
+        
+        tasks = [self.fetch_data(dformat="csv", feature_type=[uri]) for uri in uris]
+        csv_payloads = await asyncio.gather(*tasks, return_exceptions=True)
+
+        dfs = []
+        for csv in csv_payloads:
+            df = pd.read_csv(io.StringIO(csv.decode("utf-8")))
+            dfs.append(df)
+
+        aligned_df = _align_and_concat(dfs)
+
+        if dformat in ("pandas", "pd"):
+            return aligned_df
+
+        return _to_geopandas(aligned_df)
 
         # for pandas/geopandas output, we request one csv per feature type and merge
         feature_types_df = self.get_feature_types()
