@@ -54,7 +54,7 @@ junit_family = "xunit2"
 pythonpath = [
     ".", "src"
 ]
-addopts = "-ra --ignore-golb=**/versions.py"
+addopts = "-ra --ignore-glob=**/version.py"
 norecursedirs = [".tox", ".venv", "build", "dist"]
 
 [tool.mypy]
