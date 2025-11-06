@@ -6,9 +6,9 @@ import tempfile
 VERSION = "0.0.2"
 
 API_BASE_URL = (
-    "https://ecoplots.tern.org.au"
+    os.getenv("ECOPLOTS_URL", "http://ecoplots-test.tern.org.au")
     if (os.getenv("ECOPLOTS_ENV") == "dev")
-    else os.getenv("ECOPLOTS_ENV")
+    else "https://ecoplots.tern.org.au"
 )
 
 CACHE_EXPIRE_SECONDS = 60 * 60 * 24 * 14  # Default cache expiration time: 14 days
