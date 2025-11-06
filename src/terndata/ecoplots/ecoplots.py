@@ -35,7 +35,7 @@ Examples:
 
 import asyncio
 import io
-from typing import Optional, Union
+from typing import Optional, Union, cast
 
 import geopandas as gpd
 import orjson
@@ -100,7 +100,7 @@ class EcoPlots(EcoPlotsBase):
         """
         super().__init__(filterset=filterset, query_filters=query_filters)
 
-    def summary(self, dformat: Optional[str] = None) -> pd.DataFrame:
+    def summary(self, dformat: Optional[str] = None) -> Union[pd.DataFrame, str]:
         """Summarize the EcoPlots data.
 
         Args:
@@ -113,7 +113,7 @@ class EcoPlots(EcoPlotsBase):
         """
         data = self.summarise_data()
         if dformat == "json":
-            return orjson.dumps(data, option=orjson.OPT_INDENT_2)
+            return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
         pairs = {"total_doc": data["total_doc"], **data["unique_count"]}
 
@@ -322,23 +322,18 @@ class EcoPlots(EcoPlotsBase):
 
         if "uri" not in feature_types_df.columns:
             raise RuntimeError("No feature types found; cannot fetch data.")
-        
-        uris = (
-            feature_types_df["uri"]
-            .dropna()
-            .astype(str)
-            .tolist()
-        )
+
+        uris = feature_types_df["uri"].dropna().astype(str).tolist()
 
         if not uris:
             # No feature types found, so no data to fetch;
             # return empty gdf
             return gpd.GeoDataFrame()
-        
+
         dfs = []
         for uri in uris:
-            csv = _run_sync(self.fetch_data(dformat="csv", feature_type=[uri]))
-            df = pd.read_csv(io.StringIO(csv.decode("utf-8")))
+            csv_bytes = cast(bytes, _run_sync(self.fetch_data(dformat="csv", feature_type=[uri])))
+            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
             dfs.append(df)
 
         aligned_df = _align_and_concat(dfs)
@@ -401,7 +396,7 @@ class AsyncEcoPlots(EcoPlots):
 
     async def get_data(
         self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
-    ) -> gpd.GeoDataFrame:
+    ) -> gpd.GeoDataFrame:  # noqa: DAR401
         """Retrieve EcoPlots data asynchronously based on the current filters.
 
         Args:
@@ -415,6 +410,7 @@ class AsyncEcoPlots(EcoPlots):
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
             ValueError: If an invalid dformat is provided.
+            BaseException: Propagated from underlying fetch tasks when data retrieval fails.  #noqa: DAR402
 
         Returns:
             Data in the requested format.
@@ -435,30 +431,28 @@ class AsyncEcoPlots(EcoPlots):
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
-        
+
         # for pandas/geopandas output, we request one csv per feature type and merge
         feature_types_df = self.get_feature_types()
 
         if "uri" not in feature_types_df.columns:
             raise RuntimeError("No feature types found; cannot fetch data.")
-        uris = (
-            feature_types_df["uri"]
-            .dropna()
-            .astype(str)
-            .tolist()
-        )
+        uris = feature_types_df["uri"].dropna().astype(str).tolist()
 
         if not uris:
             # No feature types found, so no data to fetch;
             # return empty gdf
             return gpd.GeoDataFrame()
-        
+
         tasks = [self.fetch_data(dformat="csv", feature_type=[uri]) for uri in uris]
         csv_payloads = await asyncio.gather(*tasks, return_exceptions=True)
 
         dfs = []
-        for csv in csv_payloads:
-            df = pd.read_csv(io.StringIO(csv.decode("utf-8")))
+        for payload in csv_payloads:
+            if isinstance(payload, BaseException):
+                raise payload
+            csv_bytes = cast(bytes, payload)
+            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
             dfs.append(df)
 
         aligned_df = _align_and_concat(dfs)
@@ -467,4 +461,3 @@ class AsyncEcoPlots(EcoPlots):
             return aligned_df
 
         return _to_geopandas(aligned_df)
-

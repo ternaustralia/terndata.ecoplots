@@ -36,3 +36,6 @@ terndata.flux.egg-info
 
 # build
 build
+
+#tox
+.tox
