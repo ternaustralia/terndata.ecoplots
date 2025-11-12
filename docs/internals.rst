@@ -1,10 +1,10 @@
-Internal Modules (Maintainers)
-==============================
+Internal Modules
+================
 
 .. automodule:: terndata.ecoplots._base
    :members:
    :private-members:
-   :special-members: __eq__, __bool__, __len__, __contains__, __getitem__, __setitem__, __delitem__, __copy__, __deepcopy__
+   :special-members: __eq__, __bool__, __str__, __repr__, __len__, __contains__, __getitem__, __setitem__, __delitem__, __copy__, __deepcopy__
    :exclude-members: Path, Iterable, TypeVar, ThreadPoolExecutor, as_completed, datetime, timezone, Coroutine
 
 .. automodule:: terndata.ecoplots._utils

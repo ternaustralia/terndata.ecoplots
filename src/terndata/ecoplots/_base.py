@@ -43,14 +43,12 @@ class EcoPlotsBase:
     user-facing public API.
 
     Attributes:
-        _base_url: Base API URL used for network calls.
         _filters: Human/canonical filter values as provided.
         _query_filters: API-ready filter values (usually URLs).
     """
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
         filterset: Optional[dict] = None,
         query_filters: Optional[dict] = None,
     ):
@@ -68,9 +66,91 @@ class EcoPlotsBase:
             query_filters: Optional mapping of facet -> list of API-ready values
                 (eg. URLs) to pre-populate the instance.
         """
-        self._base_url = base_url or API_BASE_URL
+        self._base_url = API_BASE_URL
         self._filters = filterset or {}
         self._query_filters = query_filters or {}
+
+    def __str__(self) -> str:
+        """Return a user-friendly string representation of the instance.
+
+        The string includes a professional header with the class name and version,
+        followed by a clean, organized summary of the current filter configuration.
+        Uses Unicode box-drawing characters for a polished, institutional look.
+
+        Returns:
+            A formatted string summarizing the instance and its filter state.
+
+        Examples:
+            >>> ec = EcoPlots()
+            >>> ec.select(site_id="TCFTNS0002")
+            >>> print(ec)
+            ╔══════════════════════════════════════════════════════════════════════════════╗
+            ║ EcoPlots                                                                     ║
+            ║ Version: 0.0.3-beta                                                          ║
+            ╠══════════════════════════════════════════════════════════════════════════════╣
+            ║ Active Filters:                                                              ║
+            ║   • site_id: TCFTNS0002                                                      ║
+            ╚══════════════════════════════════════════════════════════════════════════════╝
+        """
+        # Box drawing constants
+        BOX_WIDTH = 78
+        
+        # Header with decorative separator
+        header = f"╔{'═' * BOX_WIDTH}╗"
+        title = f"║ {self.__class__.__name__:<{BOX_WIDTH - 2}} ║"
+        version_line = f"║ Version: {VERSION:<{BOX_WIDTH - 11}} ║"
+        separator = f"╠{'═' * BOX_WIDTH}╣"
+        footer = f"╚{'═' * BOX_WIDTH}╝"
+
+        # Filter summary
+        filter_count = len(self._filters)
+        query_filter_count = len(self._query_filters)
+
+        lines = [header, title, version_line, separator]
+
+        # Filter section
+        if filter_count > 0:
+            lines.append(f"║ {'Active Filters:':<{BOX_WIDTH - 2}} ║")
+            for key, value in self._filters.items():
+                # Truncate long values for readability
+                value_str = str(value)
+                max_value_len = BOX_WIDTH - 10 - len(key)  # Account for "║   • key: "
+                if len(value_str) > max_value_len:
+                    value_str = value_str[:max_value_len - 3] + "..."
+                
+                content = f"  • {key}: {value_str}"
+                lines.append(f"║ {content:<{BOX_WIDTH - 2}} ║")
+        else:
+            lines.append(f"║ {'No filters applied':<{BOX_WIDTH - 2}} ║")
+
+        # Query filter section (internal)
+        if query_filter_count > 0:
+            lines.append(f"║ {'':<{BOX_WIDTH - 2}} ║")
+            query_info = f"Resolved Query Filters: {query_filter_count}"
+            lines.append(f"║ {query_info:<{BOX_WIDTH - 2}} ║")
+
+        lines.append(footer)
+
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        """Return a string representation that can reconstruct the instance.
+
+        The representation is a valid Python expression that could be used to
+        recreate an equivalent instance with the same filter configuration.
+
+        Returns:
+            A string representation suitable for debugging and reconstruction.
+        """
+        # Format filters for readability
+        filters_repr = repr(self._filters) if self._filters else "{}"
+        query_filters_repr = repr(self._query_filters) if self._query_filters else "{}"
+
+        return (
+            f"{self.__class__.__name__}("
+            f"filterset={filters_repr}, "
+            f"query_filters={query_filters_repr})"
+        )
 
     def __eq__(self, other) -> bool:
         """Compare two instances for structural equality.
