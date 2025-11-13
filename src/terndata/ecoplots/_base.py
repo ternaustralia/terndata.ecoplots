@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import struct
+import sys
 import tempfile
 import warnings
 from collections.abc import Iterable
@@ -24,6 +25,7 @@ from ._config import (
     QUERY_FACETS,
     VERSION,
 )
+from ._exceptions import EcoPlotsError
 from ._nlp_utils import (
     resolve_facet,
     resolve_region_type,
@@ -59,8 +61,6 @@ class EcoPlotsBase:
         _validate_filters().
 
         Args:
-            base_url: Optional override for the API base URL. If omitted the
-                module-level API_BASE_URL is used.
             filterset: Optional mapping of facet -> list of human/canonical values
                 to pre-populate the instance.
             query_filters: Optional mapping of facet -> list of API-ready values
@@ -69,6 +69,26 @@ class EcoPlotsBase:
         self._base_url = API_BASE_URL
         self._filters = filterset or {}
         self._query_filters = query_filters or {}
+
+    @staticmethod
+    def _display_warning(message: str) -> None:
+        """Display a clean, formatted warning message in Jupyter/IPython environments.
+
+        This method provides a cleaner alternative to Python's default warnings.warn()
+        which includes verbose file paths and line numbers. In Jupyter notebooks,
+        it prints a styled warning message directly.
+
+        Args:
+            message: The warning message to display.
+        """
+        # Check if we're in IPython/Jupyter
+        try:
+            get_ipython  # type: ignore  # noqa: F821
+            # In Jupyter/IPython - use clean print with styling
+            print(f"\n⚠️  Warning: {message}\n", file=sys.stderr)  # noqa: T201
+        except NameError:
+            # Not in IPython - use standard warnings
+            warnings.warn(message, UserWarning, stacklevel=4)
 
     def __str__(self) -> str:
         """Return a user-friendly string representation of the instance.
@@ -94,7 +114,7 @@ class EcoPlotsBase:
         """
         # Box drawing constants
         BOX_WIDTH = 78
-        
+
         # Header with decorative separator
         header = f"╔{'═' * BOX_WIDTH}╗"
         title = f"║ {self.__class__.__name__:<{BOX_WIDTH - 2}} ║"
@@ -116,8 +136,8 @@ class EcoPlotsBase:
                 value_str = str(value)
                 max_value_len = BOX_WIDTH - 10 - len(key)  # Account for "║   • key: "
                 if len(value_str) > max_value_len:
-                    value_str = value_str[:max_value_len - 3] + "..."
-                
+                    value_str = value_str[:max_value_len - 3] + "..."  # noqa: BLK100
+
                 content = f"  • {key}: {value_str}"
                 lines.append(f"║ {content:<{BOX_WIDTH - 2}} ║")
         else:
@@ -434,8 +454,8 @@ class EcoPlotsBase:
             **kwargs: Alternative way to pass filters, e.g. ``site_id="ABC"``.
 
         Raises:
-            ValueError: Unknown filter keys.
-            ValueError: ``region`` provided without current or new ``region_type``.
+            EcoPlotsError: Unknown filter keys.
+            EcoPlotsError: ``region`` provided without current or new ``region_type``.
 
         Returns:
             self for chaining.
@@ -452,16 +472,19 @@ class EcoPlotsBase:
         # 1. Validate allowed keys
         invalid_keys = set(input_filters) - set(QUERY_FACETS)
         if invalid_keys:
-            raise ValueError(f"Invalid filter keys: {invalid_keys}. Allowed: {QUERY_FACETS}")
+            raise EcoPlotsError(f"Invalid filter keys: {invalid_keys}. Allowed: {QUERY_FACETS}")
 
         # 2. Validate region logic
         if "region" in input_filters:
             region_type_now = "region_type" in input_filters
             region_type_before = "region_type" in self._filters
             if not (region_type_now or region_type_before):
-                raise ValueError("'region_type' must be provided before or with 'region'.")
+                raise EcoPlotsError("'region_type' must be provided before or with 'region'.")
 
-        # 3. Merge filters (always as list)
+        # 3. Save current state for potential rollback
+        filters_backup = copy.deepcopy(self._filters)
+
+        # 4. Merge filters (always as list)
         for k, v in input_filters.items():
             if v is None:
                 continue
@@ -477,8 +500,12 @@ class EcoPlotsBase:
             else:
                 self._filters[k] = list(v)
 
-        # 4. Validate filters
-        self._validate_filters()
+        # 5. Validate filters - if validation fails (returns False), rollback
+        validation_passed = self._validate_filters()
+
+        if not validation_passed:
+            # Rollback to previous state
+            self._filters = filters_backup
 
         # print(f"Filters updated: {self._filters}")  # Debugging output
 
@@ -497,9 +524,9 @@ class EcoPlotsBase:
             **kwargs: Alternative way to pass removals, e.g. ``site_id="TCFTNS0002"``.
 
         Raises:
-            ValueError: Unknown filter keys (not in ``QUERY_FACETS``).
+            EcoPlotsError: Unknown filter keys (not in ``QUERY_FACETS``).
             KeyError: Facet not present in current filters.
-            ValueError: Specific values requested but not found for that facet.
+            EcoPlotsError: Specific values requested but not found for that facet.
 
         Returns:
             self (chainable)
@@ -514,7 +541,7 @@ class EcoPlotsBase:
         # 1. Validate allowed keys
         invalid_keys = set(input_filters) - set(QUERY_FACETS)
         if invalid_keys:
-            raise ValueError(f"Invalid filter keys: {invalid_keys}. Allowed: {QUERY_FACETS}")
+            raise EcoPlotsError(f"Invalid filter keys: {invalid_keys}. Allowed: {QUERY_FACETS}")
 
         removed_facets = set()
 
@@ -530,7 +557,7 @@ class EcoPlotsBase:
                 continue
 
             if facet == "spatial" and vals is not None:
-                raise ValueError(
+                raise EcoPlotsError(
                     "Cannot remove specific values from 'spatial' filter; "
                     "use None to clear entire facet."
                 )
@@ -544,7 +571,7 @@ class EcoPlotsBase:
             existing = self._filters.get(facet, [])
             missing = [v for v in vals if v not in existing]
             if missing:
-                raise ValueError(f"Values not found in facet {facet!r}: {missing}")
+                raise EcoPlotsError(f"Values not found in facet {facet!r}: {missing}")
 
             # remove requested values
             self._filters[facet] = [v for v in existing if v not in vals]
@@ -583,7 +610,7 @@ class EcoPlotsBase:
             facet: The facet to retrieve the filter for. Defaults to All.
 
         Raises:
-            ValueError: If an invalid facet name is provided.
+            EcoPlotsError: If an invalid facet name is provided.
 
         Returns:
             The current filter values for the specified facet as list.
@@ -593,7 +620,7 @@ class EcoPlotsBase:
             facet_val = resolve_facet(facet, QUERY_FACETS)
             if facet_val:
                 return self._filters.get(facet_val)
-            raise ValueError(
+            raise EcoPlotsError(
                 f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
             )
 
@@ -606,7 +633,7 @@ class EcoPlotsBase:
             facet: The facet to retrieve the query filters for. Defaults to None.
 
         Raises:
-            ValueError: If an invalid facet name is provided.
+            EcoPlotsError: If an invalid facet name is provided.
 
         Returns:
             A dictionary of the current query filters.
@@ -616,7 +643,7 @@ class EcoPlotsBase:
             facet_val = resolve_facet(facet, QUERY_FACETS)
             if facet_val:
                 return self._query_filters.get(facet_val)
-            raise ValueError(
+            raise EcoPlotsError(
                 f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
             )
 
@@ -637,17 +664,17 @@ class EcoPlotsBase:
             Parsed JSON payload returned by the discovery endpoint.
 
         Raises:
-            ValueError: If the facet cannot be resolved.
+            EcoPlotsError: If the facet cannot be resolved.
 
         Notes:
             - Internal use only
-            - A 10-second request timeout is enforced.
+            - A 60-second request timeout is enforced.
         """
 
         facet_param = resolve_facet(discovery_facet, DISCOVERY_FACETS)
 
         if not facet_param:
-            raise ValueError(f"Invalid discovery facet: {discovery_facet}")
+            raise EcoPlotsError(f"Invalid discovery facet: {discovery_facet}")
 
         if facet_param == "region" and region_type:
             region_type_val = resolve_region_type(region_type)
@@ -657,7 +684,7 @@ class EcoPlotsBase:
 
         payload = {"query": copy.deepcopy(self._query_filters)}
 
-        resp = requests.post(url, json=payload, timeout=10)
+        resp = requests.post(url, json=payload, timeout=60)
         resp.raise_for_status()
         return orjson.loads(resp.content)
 
@@ -682,14 +709,15 @@ class EcoPlotsBase:
             Parsed JSON payload (GeoJSON) returned by the data endpoint.
 
         Raises:
-            ValueError: If an invalid dformat is provided.
+            EcoPlotsError: If an invalid dformat is provided.
 
         Notes:
-            - Timeout is 60s when pagination is used; otherwise 3000s.
+            - Timeout is 300s (5 min) when pagination is used; 3000s (50 min) otherwise.
+            - Socket read timeout matches total timeout; connection timeout is 30s.
             - Intended for internal use only.
         """
         if dformat not in ("geojson", "csv"):
-            raise ValueError("dformat must be one of 'geojson' or 'csv'")
+            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
 
         payload = {
             "query": copy.deepcopy(self._query_filters),
@@ -702,15 +730,17 @@ class EcoPlotsBase:
 
         if page_number and page_size:
             payload.update({"page_number": page_number, "page_size": page_size})
-            timeout = aiohttp.ClientTimeout(total=60)
+            timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
         else:
             del payload["page_number"]
             del payload["page_size"]
-            timeout = aiohttp.ClientTimeout(total=3000)
+            timeout = aiohttp.ClientTimeout(total=3000, sock_read=3000, sock_connect=30)
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{self._base_url}/api/v1.0/data?dformat={dformat}", json=payload
+                f"{self._base_url}/api/v1.0/data?dformat={dformat}",
+                json=payload,
+                timeout=timeout
             ) as resp:
                 resp.raise_for_status()
                 data = await resp.read()
@@ -730,7 +760,7 @@ class EcoPlotsBase:
             Parsed JSON payload containing attribute identifiers.
 
         Raises:
-            ValueError: If the attribute cannot be resolved.
+            EcoPlotsError: If the attribute cannot be resolved.
 
         Notes:
             - A 30-second request timeout is enforced.
@@ -739,7 +769,7 @@ class EcoPlotsBase:
         facet_param = resolve_facet(discovery_attribute, DISCOVERY_ATTRIBUTES)
 
         if not facet_param:
-            raise ValueError(f"Invalid discovery facet: {discovery_attribute}")
+            raise EcoPlotsError(f"Invalid discovery facet: {discovery_attribute}")
 
         url = f"{self._base_url}/api/v1.0/discovery/attributes"
 
@@ -849,7 +879,7 @@ class EcoPlotsBase:
 
         Raises:
             FileNotFoundError: If the file does not exist.
-            ValueError: If the file does not have a `.ecoproj` suffix, the magic
+            EcoPlotsError: If the file does not have a `.ecoproj` suffix, the magic
                 header or version is invalid, the file is truncated, or the checksum
                 does not match the payload.
         """
@@ -857,21 +887,21 @@ class EcoPlotsBase:
         if not p.exists():
             raise FileNotFoundError(str(p))
         if p.suffix != ".ecoproj":
-            raise ValueError(f"Expected a '.ecoproj' file, got: {p.name}")
+            raise EcoPlotsError(f"Expected a '.ecoproj' file, got: {p.name}")
 
         with open(p, "rb") as f:
             if f.read(4) != MAGIC:
-                raise ValueError("Invalid project file (bad magic).")
+                raise EcoPlotsError("Invalid project file (bad magic).")
             ver = struct.unpack(">B", f.read(1))[0]
             if ver != VERSION:
-                raise ValueError(f"Incompatible project version: {ver} (expected {VERSION}).")
+                raise EcoPlotsError(f"Incompatible project version: {ver} (expected {VERSION}).")
             sha = f.read(32)
             n = struct.unpack(">Q", f.read(8))[0]
             body = f.read(n)
             if len(body) != n:
-                raise ValueError("Truncated project file.")
+                raise EcoPlotsError("Truncated project file.")
             if hashlib.sha256(body).digest() != sha:
-                raise ValueError("Project integrity check failed (checksum mismatch).")
+                raise EcoPlotsError("Project integrity check failed (checksum mismatch).")
 
         data = orjson.loads(body)
 
@@ -886,7 +916,7 @@ class EcoPlotsBase:
             yields zero records (a warning is issued).
 
         Raises:
-            ValueError: If any facet contains values that cannot be matched.
+            EcoPlotsError: If any facet contains values that cannot be matched.
 
         Notes:
             - Intended for internal use only.
@@ -937,15 +967,13 @@ class EcoPlotsBase:
             msg = "The following filter values could not be matched:\n" + "\n".join(
                 f"Facet '{facet}': {unmatched}" for facet, unmatched in all_unmatched.items()
             )
-            raise ValueError(msg)
+            raise EcoPlotsError(msg)
 
         data = self.summarise_data(query_filters=query_filters)
         if data.get("total_doc", 0) == 0:
-            warnings.warn(
+            self._display_warning(
                 "The applied filters result in zero matching records. "
-                "Please adjust your filters. Skipping current selection...",
-                UserWarning,
-                stacklevel=3,
+                "Please adjust your filters. Skipping current selection..."
             )
             return False
 

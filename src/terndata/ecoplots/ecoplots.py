@@ -44,7 +44,7 @@ from diskcache import Cache
 
 from ._base import EcoPlotsBase
 from ._config import CACHE_DIR
-from ._flatten_response._streaming import _flatten_geojson
+from ._exceptions import EcoPlotsError
 from ._gui import spatial_selector
 from ._utils import (
     _align_and_concat,
@@ -115,34 +115,82 @@ class EcoPlots(EcoPlotsBase):
         if dformat == "json":
             return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
-        pairs = {"total_doc": data["total_doc"], **data["unique_count"]}
+        pairs = {"observations": data["total_doc"], **data["unique_count"]}
 
         return pd.Series(pairs, name="count").rename_axis("metric").reset_index()
 
-    def preview(self, dformat: Optional[str] = None) -> Union[gpd.GeoDataFrame, dict]:
-        """Fetch a small, first-page preview of EcoPlots data.
+    def preview(self, dformat: Optional[str] = None) -> Union[gpd.GeoDataFrame, dict, str]:
+        """Fetch a small, first-page preview of EcoPlots data.  # noqa: DAR401, D415
+
+        This method uses the same strategy as `get_data()` but only fetches a small
+        subset (10 records from up to 2 feature types) for quick preview.
 
         Args:
             dformat: Output format.
-                - If "geojson" or "json", returns a pretty-printed GeoJSON string.
-                - If "pandas" or "geopandas" (default), returns a GeoDataFrame.
+                - "geojson" or "json": returns a pretty-printed GeoJSON string.
+                - "pandas" (or "pd"): returns a pandas DataFrame.
+                - "geopandas" (or "gpd") (default): returns a GeoDataFrame.
 
         Returns:
             Preview data in the requested format.
 
         Raises:
-            ValueError: If an invalid dformat is provided.
+            EcoPlotsError: If an invalid dformat is provided.
+            RuntimeError: If no feature types found.
         """
-        geojson_data = _run_sync(self.fetch_data(page_number=1, page_size=10))
-        if dformat == "geojson" or dformat == "json":
+        if dformat in ("geojson", "json"):
+            geojson_data = _run_sync(self.fetch_data(page_number=1, page_size=10))
             return orjson.dumps(geojson_data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
-            raise ValueError(
+            raise EcoPlotsError(
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
-        return _flatten_geojson(geojson_data)
+
+        # Same strategy as get_data(): fetch CSV per feature type, but limit to 2 feature types
+        feature_types_df = self.get_feature_types()
+
+        if "uri" not in feature_types_df.columns:
+            raise RuntimeError("No feature types found; cannot preview data.")
+
+        uris = feature_types_df["uri"].dropna().astype(str).tolist()
+
+        if not uris:
+            # No feature types found, return empty gdf
+            return gpd.GeoDataFrame()
+
+        # Limit to first 2 feature types for preview
+        preview_uris = uris[:2]
+
+        # Fetch paginated data (10 records per feature type)
+        async def _fetch_preview():
+            tasks = [
+                self.fetch_data(page_number=1, page_size=5, dformat="csv", feature_type=[uri])
+                for uri in preview_uris
+            ]
+            return await asyncio.gather(*tasks, return_exceptions=True)
+
+        csv_payloads = _run_sync(_fetch_preview())
+
+        dfs = []
+        for payload in csv_payloads:
+            if isinstance(payload, BaseException):
+                raise payload
+            csv_bytes = cast(bytes, payload)
+            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
+            dfs.append(df)
+
+        aligned_df = _align_and_concat(dfs)
+
+        # Limit preview to 10 records maximum
+        if len(aligned_df) > 10:
+            aligned_df = aligned_df.head(10)
+
+        if dformat in ("pandas", "pd"):
+            return aligned_df
+
+        return _to_geopandas(aligned_df)
 
     def get_datasources(self) -> pd.DataFrame:
         """Get the data sources available for applied filters.
@@ -296,7 +344,7 @@ class EcoPlots(EcoPlotsBase):
 
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
-            ValueError: If an invalid dformat is provided.
+            EcoPlotsError: If an invalid dformat is provided.
 
         Returns:
             Data in the requested format.
@@ -313,7 +361,7 @@ class EcoPlots(EcoPlotsBase):
             return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
         if dformat not in ("pandas", "geopandas", "pd", "gpd"):
-            raise ValueError(
+            raise EcoPlotsError(
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )
@@ -409,7 +457,7 @@ class AsyncEcoPlots(EcoPlots):
 
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
-            ValueError: If an invalid dformat is provided.
+            EcoPlotsError: If an invalid dformat is provided.
             BaseException: Propagated from underlying fetch tasks when data retrieval fails.  #noqa: DAR402
 
         Returns:
@@ -427,7 +475,7 @@ class AsyncEcoPlots(EcoPlots):
             return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
-            raise ValueError(
+            raise EcoPlotsError(
                 "Invalid 'dformat' specified. Supported values are: None, "
                 "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', and 'json'."
             )

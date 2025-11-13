@@ -3,7 +3,7 @@ import tempfile
 
 # Default configuration
 
-VERSION = "0.0.3-beta"
+VERSION = "0.0.3-beta2"
 
 API_BASE_URL = "http://ecoplots-test.tern.org.au"
 
@@ -36,6 +36,7 @@ QUERY_FACETS = [
     "feature_type",
     "observed_property",
     "spatial",
+    "project",
     # "description", #TODO: AI based description to facet mapping
 ]
 

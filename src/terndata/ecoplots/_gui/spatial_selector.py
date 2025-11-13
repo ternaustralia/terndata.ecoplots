@@ -215,7 +215,9 @@ def spatial_selector(
         b.add_class("ecop-btn")
         b.add_class(cls)
 
-    status = HTML(value="Draw a rectangle or polygon, then click <b>Preview</b>.")
+    status = HTML(
+        value="<b>Draw a shape:</b> Use the rectangle or polygon tool, then click <b>Preview</b>."
+    )
     out = Output(layout={"border": "1px solid #e5e5e5", "max_height": "220px", "overflow": "auto"})
 
     drawn_geom: Optional[dict[str, Any]] = None
@@ -234,7 +236,7 @@ def spatial_selector(
 
         nonlocal drawn_geom
         drawn_geom = _extract_geometry(geo_json)
-        status.value = "Shape captured. Click <b>Preview</b> to view WKT."
+        status.value = "<b>Shape captured.</b> Click <b>Preview</b> to view WKT representation."
         # Zoom to selection
         if drawn_geom:
             g = shp_shape(drawn_geom)
@@ -278,16 +280,18 @@ def spatial_selector(
         with out:
             out.clear_output()
             if not wkt:
-                # print("No geometry drawn.")
-                out.append_stdout("No geometry drawn.\n")
+                out.append_stdout("⚠️  No geometry drawn.\n")
                 return
-            # print("[Selected spatial filter — WKT POLYGON]")
-            # print(wkt)
-            # print("\nUse in code:\n  ec.select(spatial=<WKT>)")
-            out.append_stdout("[Selected spatial filter — WKT POLYGON]\n")
-            out.append_stdout(f"{str(wkt)}\n")
-            out.append_stdout("\nUse in code:\n  ec.select(spatial=<WKT>)\n")
-        status.value = "Review the WKT above. Click <b>Confirm</b> to apply, or <b>Clear</b>."
+            out.append_stdout("─" * 60 + "\n")
+            out.append_stdout("📍 Selected Spatial Filter (WKT POLYGON)\n")
+            out.append_stdout("─" * 60 + "\n")
+            out.append_stdout(f"{str(wkt)}\n\n")
+            out.append_stdout("💡 Usage in code:\n")
+            out.append_stdout("   ecoplots.select(spatial=<WKT>)\n")
+            out.append_stdout("─" * 60 + "\n")
+        status.value = (
+            "<b>WKT ready.</b> Click <b>Confirm</b> to apply the filter, or <b>Clear</b> to reset."
+        )
 
     def _confirm(_btn=None) -> None:
         """Apply the current selection by calling `ecoplots.select(spatial=<WKT>)`.
@@ -297,13 +301,68 @@ def spatial_selector(
         """
         wkt = _current_wkt()
         if not wkt:
-            status.value = "<b>No geometry selected.</b> Draw and Preview first."
+            status.value = (
+                "<b>⚠️ No geometry selected. </b>"
+                "Please draw a shape and click <b>Preview</b> first."
+            )
             return
+
+        # Store current spatial filter state before applying
+        had_spatial_before = "spatial" in ecoplots._filters
+        spatial_before = ecoplots._filters.get("spatial") if had_spatial_before else None
+
         try:
             ecoplots.select(spatial=wkt)
-            status.value = "<b>Applied.</b> The spatial filter has been set via select()."
+
+            # Check if the filter was actually applied or rolled back
+            spatial_after = ecoplots._filters.get("spatial")
+
+            if spatial_after == wkt:
+                # Filter successfully applied
+                status.value = (
+                    "<b>✅ Spatial filter applied.</b> The selection has been successfully set."
+                )
+                with out:
+                    out.clear_output()
+                    out.append_stdout("✅ Filter applied successfully.\n\n")
+                    out.append_stdout("─" * 60 + "\n")
+                    out.append_stdout("💡 Usage in code:\n")
+                    out.append_stdout("─" * 60 + "\n")
+                    out.append_stdout(f"ecoplots.select(spatial='{wkt}')\n")
+                    out.append_stdout("─" * 60 + "\n")
+            elif spatial_after == spatial_before:
+                # Filter was rolled back (validation returned zero records)
+                status.value = (
+                    "<b>⚠️ Filter rolled back.</b> The selected area contains no matching records. "
+                    "Try a different region or adjust other filters first."
+                )
+                with out:
+                    out.clear_output()
+                    out.append_stdout(
+                        "⚠️  The selected spatial area resulted in zero matching records.\n"
+                    )
+                    out.append_stdout("    Filter has been rolled back to previous state.\n\n")
+                    out.append_stdout("💡 Suggestions:\n")
+                    out.append_stdout("   • Try a different geographic region\n")
+                    out.append_stdout("   • Adjust other active filters to broaden results\n")
+                    out.append_stdout("   • Check if data exists in the selected area\n")
+            else:
+                # Unexpected state (shouldn't happen)
+                status.value = "<b>✅ Filter applied.</b> Spatial filter has been updated."
+                with out:
+                    out.clear_output()
+                    out.append_stdout("✅ Filter applied successfully.\n\n")
+                    out.append_stdout("─" * 60 + "\n")
+                    out.append_stdout("💡 Usage in code:\n")
+                    out.append_stdout("─" * 60 + "\n")
+                    out.append_stdout(f"ecoplots.select(spatial='{wkt}')\n")
+                    out.append_stdout("─" * 60 + "\n")
+
         except (AttributeError, ValueError, RuntimeError) as e:
-            status.value = f"<b>Failed to apply:</b> {type(e).__name__}: {e}"
+            status.value = f"<b>❌ Error:</b> {type(e).__name__}: {e}"
+            with out:
+                out.clear_output()
+                out.append_stdout(f"❌ Error applying filter:\n   {type(e).__name__}: {e}\n")
 
     def _clear(_btn=None) -> None:
         """Clear the current selection and reset the preview output and zoom.
@@ -316,7 +375,9 @@ def spatial_selector(
         drawn_geom = None
         out.clear_output()
         m.fit_bounds(_AU_BOUNDS)  # reset view to Australia
-        status.value = "Cleared. Draw again, then click <b>Preview</b>."
+        status.value = (
+            "<b>Selection cleared.</b> Draw a new shape and click <b>Preview</b> when ready."
+        )
 
     preview_btn.on_click(_preview)
     confirm_btn.on_click(_confirm)
@@ -324,5 +385,26 @@ def spatial_selector(
 
     controls = HBox([preview_btn, confirm_btn, clear_btn])
 
+    # Add CSS for output formatting
+    # fmt: off
+    output_css = HTML(
+        value="""
+        <style>
+          /* Monospace font for code output with text wrapping */
+          .ecop-output pre,
+          .ecop-output code {
+              font-family: Monaco, Menlo, 'Ubuntu Mono', Consolas, monospace !important;
+              font-size: 12px;
+              line-height: 1.4;
+              white-space: pre-wrap !important;
+              word-wrap: break-word !important;
+              overflow-wrap: break-word !important;
+          }
+        </style>
+        """
+    )
+    # fmt: on
+    out.add_class("ecop-output")
+
     # Stack everything: CSS, map, buttons, status, preview output
-    return VBox([css, css_overlay, m, controls, status, out])
+    return VBox([css, css_overlay, output_css, m, controls, status, out])

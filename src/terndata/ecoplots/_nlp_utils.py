@@ -1,10 +1,12 @@
 import asyncio
 import re
+import sys
 import warnings
 from typing import Optional
 
 from rapidfuzz import fuzz, process
 
+from ._exceptions import EcoPlotsError
 from ._utils import _get_cached_labels
 
 ALL_FACETS = ["region_type", "region", "dataset", "feature_type", "observed_property"]
@@ -21,6 +23,26 @@ REGION_TYPES_MAP = {
 
 REGION_TYPES = list(REGION_TYPES_MAP.keys())
 REGION_URLS = list(REGION_TYPES_MAP.values())
+
+
+def _display_warning(message: str) -> None:
+    """Display a clean, formatted warning message in Jupyter/IPython environments.
+
+    This function provides a cleaner alternative to Python's default warnings.warn()
+    which includes verbose file paths and line numbers. In Jupyter notebooks,
+    it prints a styled warning message directly.
+
+    Args:
+        message: The warning message to display.
+    """
+    # Check if we're in IPython/Jupyter
+    try:
+        get_ipython  # type: ignore  # noqa: F821
+        # In Jupyter/IPython - use clean print with styling
+        print(f"\n⚠️  Warning: {message}\n", file=sys.stderr)  # noqa: T201
+    except NameError:
+        # Not in IPython - use standard warnings
+        warnings.warn(message, UserWarning, stacklevel=4)
 
 
 def resolve_facet(user_input: str, allowed_facets: list, threshold: int = 70) -> Optional[str]:
@@ -65,7 +87,7 @@ def resolve_region_type(
         The resolved region type label if a match is found; otherwise, None.
 
     Raises:
-        ValueError: If the input cannot be resolved to a known region type or URL,
+        EcoPlotsError: If the input cannot be resolved to a known region type or URL,
             or if no close matches are found.
 
     Notes:
@@ -85,23 +107,19 @@ def resolve_region_type(
             best_url, score, _ = result
             if score >= threshold:
                 # Auto-correct but warn user
-                warnings.warn(
-                    f"Input URL '{user_input}' corrected to '{best_url}'.",
-                    UserWarning,
-                    stacklevel=3,
-                )
+                _display_warning(f"Input URL '{user_input}' corrected to '{best_url}'.")
                 return next(k for k, v in REGION_TYPES_MAP.items() if v == best_url)
         # Suggest but don't auto-correct
         result = process.extractOne(user_input, REGION_URLS, scorer=fuzz.QRatio)  # type: ignore
         if result is None:
-            raise ValueError(
+            raise EcoPlotsError(
                 f"Unrecognized URL '{user_input}'. "
                 f"No close matches found. Allowed URLs: {', '.join(REGION_URLS)}."
             )
         best_url, score, _ = result
         if score >= 20:
-            raise ValueError(f"Unrecognized URL '{user_input}'. " f"Did you mean '{best_url}'?")
-        raise ValueError(
+            raise EcoPlotsError(f"Unrecognized URL '{user_input}'. Did you mean '{best_url}'?")
+        raise EcoPlotsError(
             f"Unrecognized URL '{user_input}'. "
             f"No close matches found. Allowed URLs: {', '.join(REGION_URLS)}."
         )
@@ -120,14 +138,14 @@ def resolve_region_type(
         if score >= threshold:
             return match
 
-        raise ValueError(
+        raise EcoPlotsError(
             f"Invalid region type: '{user_input}'. "
             f"Did you mean '{match}'?\n"
             f"Allowed types: {', '.join(allowed_region_types)}."
         )
 
     # No matches at all (very rare)
-    raise ValueError(
+    raise EcoPlotsError(
         f"Invalid region type: '{user_input}'. "
         f"No close matches found. Allowed types: {', '.join(allowed_region_types)}."
     )
@@ -142,10 +160,10 @@ def resolve_single_input(candidate: str, labels_dict: dict[str, str], threshold:
         threshold: The minimum similarity score for a match to be considered valid.
 
     Raises:
-        ValueError: If the input cannot be resolved to a known label or URL.
+        EcoPlotsError: If the input cannot be resolved to a known label or URL.
 
     Returns:
-        The resolved canonical URL if a match is found; otherwise, raises a ValueError.
+        The resolved canonical URL if a match is found; otherwise, raises a EcoPlotsError.
 
     Notes:
         - Intended for internal use only.
@@ -163,14 +181,10 @@ def resolve_single_input(candidate: str, labels_dict: dict[str, str], threshold:
         if result is not None:
             best_uri, score, _ = result
             if score >= threshold:
-                warnings.warn(
-                    f"Input URL '{candidate}' corrected to '{best_uri}').",
-                    UserWarning,
-                    stacklevel=3,
-                )
+                _display_warning(f"Input URL '{candidate}' corrected to '{best_uri}').")
                 return best_uri
 
-        raise ValueError(f"Unrecognized URL '{candidate}'.")
+        raise EcoPlotsError(f"Unrecognized URL '{candidate}'.")
 
     # --- Case 2: Input is a name ---
     if candidate in names:
@@ -184,15 +198,11 @@ def resolve_single_input(candidate: str, labels_dict: dict[str, str], threshold:
         best_name, score, _ = result
         if score >= threshold:
             if score < 100:
-                warnings.warn(
-                    f"Input '{candidate}' resolved to '{best_name}'.",
-                    UserWarning,
-                    stacklevel=3,
-                )
+                _display_warning(f"Input '{candidate}' resolved to '{best_name}'.")
             # Best URI for the resolved name
             return next(uri for uri, lbl in labels_dict.items() if lbl == best_name)
 
-    raise ValueError(f"Unrecognized value '{candidate}'.")
+    raise EcoPlotsError(f"Unrecognized value '{candidate}'. Did you mean '{best_name}'?")
 
 
 async def resolve_facet_inputs(
@@ -208,7 +218,7 @@ async def resolve_facet_inputs(
         region_type: The region type to use for resolution (if applicable).
 
     Raises:
-        ValueError: If region facet is used without region_type.
+        EcoPlotsError: If region facet is used without region_type.
 
     Returns:
         A list of resolved canonical URLs.
@@ -218,7 +228,7 @@ async def resolve_facet_inputs(
     """
     # Special handling for region facet
     if facet == "region" and not region_type:
-        raise ValueError("Filtering by 'region' requires 'region_type' to be provided.")
+        raise EcoPlotsError("Filtering by 'region' requires 'region_type' to be provided.")
 
     labels_dict = _get_cached_labels(facet)
     loop = asyncio.get_event_loop()
@@ -272,10 +282,8 @@ def resolve_filter_values_to_urls(
             best_name, score, _ = result
             if score >= threshold:
                 best_uri = next(u for u, n in labels_dict.items() if n == best_name)
-                warnings.warn(
-                    f"Value '{candidate}' for facet '{facet}' corrected to '{best_name}'.",
-                    UserWarning,
-                    stacklevel=3,
+                _display_warning(
+                    f"Value '{candidate}' for facet '{facet}' corrected to '{best_name}'."
                 )
                 resolved.add(best_uri)
                 matched.add(best_name)
@@ -307,7 +315,7 @@ def validate_facet(facet, value) -> tuple:
         None
 
     """
-    labels_dict = _get_cached_labels(facet)
+    labels_dict = _get_cached_labels(facet if facet != "project" else "dataset")
     user_values = list(value) if isinstance(value, (list, tuple)) else [value]
     urls, matched, unmatched, corrected = resolve_filter_values_to_urls(
         facet, user_values, labels_dict

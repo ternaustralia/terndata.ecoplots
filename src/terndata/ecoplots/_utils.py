@@ -17,6 +17,7 @@ from ._config import (
     CACHE_EXPIRE_SECONDS,
     VOCAB_FACETS,
 )
+from ._exceptions import EcoPlotsError
 
 _WKT_RE = re.compile(
     r"^\s*(SRID=\d+;)?\s*(POINT|LINESTRING|POLYGON|MULTIPOINT|MULTILINESTRING|MULTIPOLYGON|GEOMETRYCOLLECTION)\s*\(.*\)\s*$",  # noqa: E501
@@ -53,8 +54,9 @@ async def _get_single_label(facet: str) -> dict[str, str]:
         - Intended for internal use only.
     """
     url = f"{API_BASE_URL}/api/v1.0/data/label/{facet}"
+    timeout = aiohttp.ClientTimeout(total=60, sock_read=60, sock_connect=10)
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+        async with session.get(url, timeout=timeout) as resp:
             resp.raise_for_status()
             result = await resp.json(loads=orjson.loads)
             return result[facet]
@@ -252,7 +254,7 @@ def _validate_spatial_input(value: Any) -> str:
         String of detected type: ``"wkt"``, ``"geojson"``, or ``"bbox"``.
 
     Raises:
-        ValueError: If the input is not a valid WKT, GeoJSON, or bbox value.
+        EcoPlotsError: If the input is not a valid WKT, GeoJSON, or bbox value.
 
     Notes:
         - Performs only structural checks; no parsing or reprojection is attempted.
@@ -264,7 +266,7 @@ def _validate_spatial_input(value: Any) -> str:
         return "geojson"
     if _is_bbox4(value):
         return "bbox"
-    raise ValueError(
+    raise EcoPlotsError(
         "'spatial' must be WKT string, GeoJSON dict, or bbox [minx, miny, maxx, maxy]."
     )
 
