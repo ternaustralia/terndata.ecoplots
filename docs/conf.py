@@ -8,6 +8,18 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+# Debug: Print Python path for troubleshooting
+print(f"[DEBUG] Python path: {sys.path[:3]}")
+print(f"[DEBUG] ROOT: {ROOT}")
+print(f"[DEBUG] SRC: {SRC}")
+
+# Test import to catch errors early
+try:
+    import terndata.ecoplots
+    print(f"[DEBUG] Successfully imported terndata.ecoplots from {terndata.ecoplots.__file__}")
+except ImportError as e:
+    print(f"[ERROR] Failed to import terndata.ecoplots: {e}")
+
 project = "terndata.ecoplots"
 author = "Avinash Chandra"
 
@@ -15,7 +27,7 @@ START_YEAR = 2025
 YEAR = datetime.now(timezone.utc).year
 years = f"{START_YEAR}-{YEAR}" if YEAR > START_YEAR else f"{YEAR}"
 copyright = f"{years}, TDSA (TERN Data Services and Analytics)"  # noqa: A001
-release = "0.1.0"
+release = "0.0.3-beta2"
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -89,8 +101,6 @@ autodoc_mock_imports = [
     "fiona",
     "pyproj",
     "rtree",
-    "numpy",
-    "pandas",
 ]
 
 exclude_patterns = ["api/modules.rst"]

@@ -1,4 +1,13 @@
-sphinx
+sphinx>=7.0
 myst-parser
 furo
 sphinx-autobuild
+
+# Core dependencies needed for autodoc to import the package
+aiohttp
+orjson
+requests
+diskcache
+pandas
+numpy
+rapidfuzz
