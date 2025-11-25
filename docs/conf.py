@@ -27,7 +27,7 @@ START_YEAR = 2025
 YEAR = datetime.now(timezone.utc).year
 years = f"{START_YEAR}-{YEAR}" if YEAR > START_YEAR else f"{YEAR}"
 copyright = f"{years}, TDSA (TERN Data Services and Analytics)"  # noqa: A001
-release = "0.0.3-beta2"
+release = "0.0.4-beta"
 
 extensions = [
     "sphinx.ext.autodoc",

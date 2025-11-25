@@ -38,7 +38,6 @@ import io
 from typing import Optional, Union, cast
 
 import geopandas as gpd
-import orjson
 import pandas as pd
 from diskcache import Cache
 
@@ -113,7 +112,7 @@ class EcoPlots(EcoPlotsBase):
         """
         data = self.summarise_data()
         if dformat == "json":
-            return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
+            return data
 
         pairs = {"observations": data["total_doc"], **data["unique_count"]}
 
@@ -140,7 +139,7 @@ class EcoPlots(EcoPlotsBase):
         """
         if dformat in ("geojson", "json"):
             geojson_data = _run_sync(self.fetch_data(page_number=1, page_size=10))
-            return orjson.dumps(geojson_data, option=orjson.OPT_INDENT_2).decode("utf-8")
+            return geojson_data
 
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
             raise EcoPlotsError(
@@ -358,7 +357,7 @@ class EcoPlots(EcoPlotsBase):
 
         if dformat in ("geojson", "json"):
             data = _run_sync(self.fetch_data())
-            return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
+            return data
 
         if dformat not in ("pandas", "geopandas", "pd", "gpd"):
             raise EcoPlotsError(
@@ -472,7 +471,7 @@ class AsyncEcoPlots(EcoPlots):
 
         if dformat in ("geojson", "json"):
             data = await self.fetch_data()
-            return orjson.dumps(data, option=orjson.OPT_INDENT_2).decode("utf-8")
+            return data
 
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
             raise EcoPlotsError(

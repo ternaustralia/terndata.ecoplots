@@ -106,7 +106,7 @@ class EcoPlotsBase:
             >>> print(ec)
             ╔══════════════════════════════════════════════════════════════════════════════╗
             ║ EcoPlots                                                                     ║
-            ║ Version: 0.0.3-beta                                                          ║
+            ║ Version: 0.0.4-beta                                                          ║
             ╠══════════════════════════════════════════════════════════════════════════════╣
             ║ Active Filters:                                                              ║
             ║   • site_id: TCFTNS0002                                                      ║
@@ -114,6 +114,7 @@ class EcoPlotsBase:
         """
         # Box drawing constants
         BOX_WIDTH = 78
+        INDENT = "    "  # 4 spaces for continuation lines
 
         # Header with decorative separator
         header = f"╔{'═' * BOX_WIDTH}╗"
@@ -132,14 +133,32 @@ class EcoPlotsBase:
         if filter_count > 0:
             lines.append(f"║ {'Active Filters:':<{BOX_WIDTH - 2}} ║")
             for key, value in self._filters.items():
-                # Truncate long values for readability
                 value_str = str(value)
-                max_value_len = BOX_WIDTH - 10 - len(key)  # Account for "║   • key: "
-                if len(value_str) > max_value_len:
-                    value_str = value_str[:max_value_len - 3] + "..."  # noqa: BLK100
-
-                content = f"  • {key}: {value_str}"
-                lines.append(f"║ {content:<{BOX_WIDTH - 2}} ║")
+                
+                # First line: "  • key: "
+                prefix = f"  • {key}: "
+                max_first_line = BOX_WIDTH - 2 - len(prefix)
+                
+                if len(value_str) <= max_first_line:
+                    # Fits on one line
+                    content = f"{prefix}{value_str}"
+                    lines.append(f"║ {content:<{BOX_WIDTH - 2}} ║")
+                else:
+                    # Needs wrapping
+                    # First line
+                    first_chunk = value_str[:max_first_line]
+                    content = f"{prefix}{first_chunk}"
+                    lines.append(f"║ {content:<{BOX_WIDTH - 2}} ║")
+                    
+                    # Continuation lines
+                    remaining = value_str[max_first_line:]
+                    max_cont_line = BOX_WIDTH - 2 - len(INDENT)
+                    
+                    while remaining:
+                        chunk = remaining[:max_cont_line]
+                        remaining = remaining[max_cont_line:]
+                        content = f"{INDENT}{chunk}"
+                        lines.append(f"║ {content:<{BOX_WIDTH - 2}} ║")
         else:
             lines.append(f"║ {'No filters applied':<{BOX_WIDTH - 2}} ║")
 
@@ -738,13 +757,25 @@ class EcoPlotsBase:
 
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                f"{self._base_url}/api/v1.0/data?dformat={dformat}",
+                f"{self._base_url}/api/v1.0/data/stream?dformat={dformat}",
                 json=payload,
-                timeout=timeout
+                timeout=timeout,
+                headers={"Accept": "text/event-stream"}
             ) as resp:
                 resp.raise_for_status()
-                data = await resp.read()
-                return data if dformat == "csv" else orjson.loads(data)
+                
+                chunks = []
+                async for line in resp.content:
+                    line = line.decode('utf-8').strip()
+                    if line:
+                        chunks.append(line)
+                # Combine all chunks into final response
+                if dformat == "csv":
+                    return '\n'.join(chunks).encode('utf-8')
+                else:
+                    # For GeoJSON, parse the complete JSON response
+                    complete_data = ''.join(chunks)
+                    return orjson.loads(complete_data)
 
     def discover_attributes(
         self,
