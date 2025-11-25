@@ -36,25 +36,35 @@ Supported Python: 3.10+
 
 ## Quick start
 
-    from terndata.ecoplots import EcoPlots
+```python
+from terndata.ecoplots import EcoPlots
 
-    ec = EcoPlots()
-    ec.select(site_id="TCFTNS0002")    # add validated filters
-    preview = ec.preview().head()      # quick look (first page)
-    gdf = ec.get_data()                # full pull (GeoDataFrame)
+ec = EcoPlots()
+ec.select(site_id="TCFTNS0002")    # add validated filters
+preview = ec.preview().head()      # quick look (first page)
+gdf = ec.get_data()                # full pull (GeoDataFrame)
+```
 
 ### Async
 
-    import asyncio
-    from terndata.ecoplots import AsyncEcoPlots
+```python
+import asyncio
+from terndata.ecoplots import AsyncEcoPlots
 
-    async def main():
-        ec = AsyncEcoPlots()
-        ec.select(site_id="TCFTNS0002")
-        gdf = await ec.get_data()
-        return gdf
+async def main():
+    ec = AsyncEcoPlots()
+    ec.select(site_id="TCFTNS0002")
+    gdf = await ec.get_data()
+    return gdf
 
-    # asyncio.run(main())
+# asyncio.run(main())
+```
+
+---
+
+## Demo
+
+For example usage, please refer to the [demo notebook](examples/demo.ipynb).
 
 ---
 

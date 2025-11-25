@@ -32,16 +32,16 @@
      </div>
    </div>
 
-What is EcoPlots?
-==================
+About EcoPlots
+==============
 TERN EcoPlots is a platform designed for searching, discovering, and accessing ecological observations—both from systematic site-based surveys and opportunistic surveys—as well as specimen samples collected during field surveys from various data sources. With TERN EcoPlots, users can search for observation data and specimen samples from systematic surveys across Australia. The platform allows users to integrate data from multiple sources and access it as a comprehensive, ready-to-use data package. Additionally, users can search for specimen samples and request access to these samples for further research.
 
 TERN EcoPlots is developed based on a semantic data integration approach. Datasets are generally received from custodians in various forms, including PostgreSQL databases and CSV file formats. In the data ingestion process, each source dataset is mapped to a `TERN Plot ontology <https://linkeddata.tern.org.au/information-models/tern-ontology>`_ including the identification and mapping of domain feature types, parameters, and categorical values to controlled vocabularies, as well as the performance of data validation routines and the resolution of taxonomic names. All data are organised in Resource Description Framework (RDF) and stored in a triple store.
 
 See also: `EcoPlots Portal <https://ecoplots.tern.org.au>`_.
 
-What is the EcoPlots Python library?
-====================================
+EcoPlots Python library
+=======================
 The EcoPlots Python library provides a small, Pythonic client for the EcoPlots REST API, so you can programmatically discover datasets, apply validated filters, preview results, and retrieve analysis-ready data.
 
 Key capabilities:
@@ -63,6 +63,7 @@ Installation
 
 Next steps
 ==========
+- `Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo.ipynb>`_ - Interactive examples and usage patterns
 - :doc:`Package overview <api/overview>`
 - :doc:`EcoPlots Client <api/ecoplots_class>`
 - :doc:`Async EcoPlots client <api/async_ecoplots_class>`
