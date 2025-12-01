@@ -1012,3 +1012,41 @@ class EcoPlotsBase:
         self._filters = all_matched
 
         return True
+    
+    def _fetch_clusters(self, geojson: Optional[dict] = None) -> dict:
+        """Fetch clustered data points for map visualization.
+
+        Args:
+            geojson: Optional GeoJSON polygon to define the area of interest.
+        
+        Returns:
+            Parsed JSON payload containing clustered data points.
+
+        Notes:
+            - Intended for internal use only.
+        """
+        payload = {
+            "query": copy.deepcopy(self._query_filters),
+            "clustering_precision": 3,
+            "geojson": geojson or {
+                "type":"Polygon",
+                "coordinates": [
+                    [
+                        [107.68366383276675,-9.83285528397626],
+                        [159.86061589572708,-9.83285528397626],
+                        [159.86061589572708,-44.49207177551449],
+                        [107.68366383276675,-44.49207177551449],
+                        [107.68366383276675,-9.83285528397626]
+                    ]
+                ]
+            }
+        }
+       
+        resp = requests.post(
+            f"{self._base_url}/api/v1.0/ui/map/clusters",
+            json=payload,
+            timeout=30,
+        )
+
+        resp.raise_for_status()
+        return orjson.loads(resp.content)
