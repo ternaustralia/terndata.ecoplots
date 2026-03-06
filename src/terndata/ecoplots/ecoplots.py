@@ -88,7 +88,12 @@ class EcoPlots(EcoPlotsBase):
         :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots`: Async counterpart with the same surface area.
     """
 
-    def __init__(self, filterset: Optional[dict] = None, query_filters: Optional[dict] = None):
+    def __init__(
+        self,
+        filterset: Optional[dict] = None,
+        query_filters: Optional[dict] = None,
+        mode: Optional[str] = "observations"
+    ):
         """Initialise the EcoPlots client with filters.
 
         If no base filter is provided, it defaults to the one specified in the config.
@@ -96,8 +101,9 @@ class EcoPlots(EcoPlotsBase):
         Args:
             filterset: Initial filter set. Defaults to None.
             query_filters: Initial query filters. Defaults to None.
+            mode: The mode of operation. Defaults to "observations".
         """
-        super().__init__(filterset=filterset, query_filters=query_filters)
+        super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
     def summary(self, dformat: Optional[str] = None) -> Union[pd.DataFrame, str]:
         """Summarize the EcoPlots data.
@@ -197,7 +203,14 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the data sources.
         """
-        data = self.discover("dataset")
+        if self._mode == "observations":
+            data = self.discover("dataset")
+        elif self._mode == "samples":
+            # Hardcoded value for now until 
+            # we have more datasets with samples
+            data = self.discover_samples("dataset")
+        else:
+            raise EcoPlotsError(f"Unsupported mode '{self._mode}' for discovering data sources.")
         return pd.DataFrame(data)
 
     def get_datasources_attributes(self) -> pd.DataFrame:
@@ -226,7 +239,10 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the sites.
         """
-        data = self.discover("site_id")
+        if self._mode == "samples":
+            data = self.discover_samples("site_id")
+        else:
+            data = self.discover("site_id")
         return pd.DataFrame(data)
 
     def get_sites_attributes(self) -> pd.DataFrame:
@@ -275,7 +291,11 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the region types.
         """
-        data = self.discover("region_type")
+        if self._mode == "samples":
+            # For samples, we have a fixed region type of "plot"
+            data = self.discover_samples("region_type")
+        else:
+            data = self.discover("region_type")
         return pd.DataFrame(data)
 
     def get_regions(self, region_type: str) -> pd.DataFrame:
@@ -287,7 +307,11 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the regions for the specified region type.
         """
-        data = self.discover("region", region_type=region_type)
+        if self._mode == "samples":
+            # For samples, we have a fixed region type of "plot", so we ignore the input and use "plot"
+            data = self.discover_samples("region", region_type=region_type)
+        else:
+            data = self.discover("region", region_type=region_type)
         return pd.DataFrame(data)
 
     def get_feature_types(self) -> pd.DataFrame:
@@ -310,10 +334,17 @@ class EcoPlots(EcoPlotsBase):
 
     def get_observation_attributes(self) -> pd.DataFrame:
         """Get the attributes of observations from the applied filters.
+        Available only in "observations" mode.
 
         Returns:
             A DataFrame containing the attributes of the observations.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "observations".
         """
+        if self._mode != "observations":
+            raise EcoPlotsError("Observation attributes are only available in 'observations' mode.")
+
         data = self.discover_attributes("observation")
         uris = data.get("observation_attributes", []) or []
         rows = []
@@ -327,6 +358,22 @@ class EcoPlots(EcoPlotsBase):
                 rows.append(row)
 
         return pd.DataFrame(rows)
+    
+    def get_material_sample_types(self) -> pd.DataFrame:
+        """Get the material sample types from the applied filters.
+        Available only in "samples" mode.
+
+        Returns:
+            A DataFrame containing the material sample types.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Material sample types are only available in 'samples' mode.")
+
+        data = self.discover_samples("material_sample_type")
+        return pd.DataFrame(data)
 
     def get_data(
         self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
@@ -430,7 +477,12 @@ class AsyncEcoPlots(EcoPlots):
           are set unless `allow_full_download=True`.
     """
 
-    def __init__(self, filterset: Optional[dict] = None, query_filters: Optional[dict] = None):
+    def __init__(
+        self,
+        filterset: Optional[dict] = None,
+        query_filters: Optional[dict] = None,
+        mode: Optional[str] = "observations"
+    ):
         """Initialize the AsyncEcoPlots client with filters.
 
         If no base filter is provided, it defaults to the one specified in the config.
@@ -438,8 +490,9 @@ class AsyncEcoPlots(EcoPlots):
         Args:
             filterset: Initial filter set. Defaults to None.
             query_filters: Initial query filters. Defaults to None.
+            mode: The mode of operation. Defaults to "observations".
         """
-        super().__init__(filterset=filterset, query_filters=query_filters)
+        super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
     async def get_data(
         self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"

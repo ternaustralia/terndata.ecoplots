@@ -8,6 +8,7 @@ from rapidfuzz import fuzz, process
 
 from ._exceptions import EcoPlotsError
 from ._utils import _get_cached_labels
+from ._config import MATERIAL_SAMPLE_TYPE_MAP
 
 ALL_FACETS = ["region_type", "region", "dataset", "feature_type", "observed_property"]
 
@@ -315,7 +316,12 @@ def validate_facet(facet, value) -> tuple:
         None
 
     """
-    labels_dict = _get_cached_labels(facet if facet != "project" else "dataset")
+    # Special handling for material_sample_type: use in-memory map instead of cache
+    if facet == "material_sample_type":
+        labels_dict = MATERIAL_SAMPLE_TYPE_MAP
+    else:
+        labels_dict = _get_cached_labels(facet if facet != "project" else "dataset")
+    
     user_values = list(value) if isinstance(value, (list, tuple)) else [value]
     urls, matched, unmatched, corrected = resolve_filter_values_to_urls(
         facet, user_values, labels_dict

@@ -6,6 +6,7 @@ import tempfile
 import warnings
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from diskcache import Cache
 from pathlib import Path
 from typing import (
     Optional,
@@ -23,7 +24,10 @@ from ._config import (
     DISCOVERY_FACETS,
     MAGIC,
     QUERY_FACETS,
+    SAMPLE_QUERY_FACETS,
     VERSION,
+    CACHE_DIR,
+    MATERIAL_SAMPLE_TYPE_MAP,
 )
 from ._exceptions import EcoPlotsError
 from ._nlp_utils import (
@@ -53,6 +57,7 @@ class EcoPlotsBase:
         self,
         filterset: Optional[dict] = None,
         query_filters: Optional[dict] = None,
+        mode: str = "observations",
     ):
         """Initialize an EcoPlotsBase instance.
 
@@ -65,10 +70,30 @@ class EcoPlotsBase:
                 to pre-populate the instance.
             query_filters: Optional mapping of facet -> list of API-ready values
                 (eg. URLs) to pre-populate the instance.
+            mode: Operational mode, either "observations" (default) or "samples".
         """
         self._base_url = API_BASE_URL
+        self._mode = mode
         self._filters = filterset or {}
         self._query_filters = query_filters or {}
+        # In samples mode we enforce a persistent dataset selection which
+        # cannot be removed by the user. Ensure both human-facing and
+        # query-side filters contain the required values.
+        if self._mode == "samples":
+            persistent_label = "TERN Ecosystem Surveillance"
+            persistent_uri = "http://linked.data.gov.au/dataset/ausplots"
+
+            if "dataset" not in self._filters:
+                self._filters["dataset"] = [persistent_label]
+            else:
+                if persistent_label not in self._filters["dataset"]:
+                    self._filters["dataset"].insert(0, persistent_label)
+
+            if "dataset" not in self._query_filters:
+                self._query_filters["dataset"] = [persistent_uri]
+            else:
+                if persistent_uri not in self._query_filters["dataset"]:
+                    self._query_filters["dataset"].insert(0, persistent_uri)
 
     @staticmethod
     def _display_warning(message: str) -> None:
@@ -105,7 +130,7 @@ class EcoPlotsBase:
             >>> ec.select(site_id="TCFTNS0002")
             >>> print(ec)
             ╔══════════════════════════════════════════════════════════════════════════════╗
-            ║ EcoPlots                                                                     ║
+            ║ EcoPlots Observations                                                        ║
             ║ Version: 0.0.4-beta                                                          ║
             ╠══════════════════════════════════════════════════════════════════════════════╣
             ║ Active Filters:                                                              ║
@@ -118,7 +143,7 @@ class EcoPlotsBase:
 
         # Header with decorative separator
         header = f"╔{'═' * BOX_WIDTH}╗"
-        title = f"║ {self.__class__.__name__:<{BOX_WIDTH - 2}} ║"
+        title = f"║ {self.__class__.__name__} {self._mode.capitalize():<{BOX_WIDTH - 2 - len(self.__class__.__name__) - 1}} ║"
         version_line = f"║ Version: {VERSION:<{BOX_WIDTH - 11}} ║"
         separator = f"╠{'═' * BOX_WIDTH}╣"
         footer = f"╚{'═' * BOX_WIDTH}╝"
@@ -186,9 +211,9 @@ class EcoPlotsBase:
         query_filters_repr = repr(self._query_filters) if self._query_filters else "{}"
 
         return (
-            f"{self.__class__.__name__}("
+            f"{self.__class__.__name__} {repr(self._mode)}("
             f"filterset={filters_repr}, "
-            f"query_filters={query_filters_repr})"
+            f"query_filters={query_filters_repr}, "
         )
 
     def __eq__(self, other) -> bool:
@@ -449,18 +474,20 @@ class EcoPlotsBase:
                 del ec['site_id', 'TCFTNS0002']         # remove a single value
                 del ec['site_id', ['A','B','C']]        # remove multiple values
         """
+        allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
+        
         if isinstance(key, tuple):
             if len(key) != 2:
                 raise KeyError("Expected ('facet', values) for value deletion.")
             facet, values = key
             # Allow human/canonical names here by resolving to canonical
-            if facet not in QUERY_FACETS:
-                raise KeyError(f"Unknown facet {facet!r}. Allowed: {', '.join(QUERY_FACETS)}")
+            if facet not in allowed_facets:
+                raise KeyError(f"Unknown facet {facet!r}. Allowed: {', '.join(allowed_facets)}")
             # Delegate; remove() expects canonical keys, same as select()
             self.remove(filters={facet: values})
         else:
-            if key not in QUERY_FACETS:
-                raise KeyError(f"Unknown facet {key!r}. Allowed: {', '.join(QUERY_FACETS)}")
+            if key not in allowed_facets:
+                raise KeyError(f"Unknown facet {key!r}. Allowed: {', '.join(allowed_facets)}")
             self.remove(filters={key: None})
 
     def select(self: SelfType, filters: Optional[dict] = None, **kwargs) -> SelfType:
@@ -488,22 +515,25 @@ class EcoPlotsBase:
         if kwargs:
             input_filters.update(kwargs)
 
-        # 1. Validate allowed keys
-        invalid_keys = set(input_filters) - set(QUERY_FACETS)
+        # 1. Determine allowed facets based on mode
+        allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
+        
+        # 2. Validate allowed keys
+        invalid_keys = set(input_filters) - set(allowed_facets)
         if invalid_keys:
-            raise EcoPlotsError(f"Invalid filter keys: {invalid_keys}. Allowed: {QUERY_FACETS}")
+            raise EcoPlotsError(f"Invalid filter keys: {invalid_keys}. Allowed: {allowed_facets}")
 
-        # 2. Validate region logic
+        # 3. Validate region logic
         if "region" in input_filters:
             region_type_now = "region_type" in input_filters
             region_type_before = "region_type" in self._filters
             if not (region_type_now or region_type_before):
                 raise EcoPlotsError("'region_type' must be provided before or with 'region'.")
 
-        # 3. Save current state for potential rollback
+        # 4. Save current state for potential rollback
         filters_backup = copy.deepcopy(self._filters)
 
-        # 4. Merge filters (always as list)
+        # 5. Merge filters (always as list)
         for k, v in input_filters.items():
             if v is None:
                 continue
@@ -519,7 +549,7 @@ class EcoPlotsBase:
             else:
                 self._filters[k] = list(v)
 
-        # 5. Validate filters - if validation fails (returns False), rollback
+        # 6. Validate filters - if validation fails (returns False), rollback
         validation_passed = self._validate_filters()
 
         if not validation_passed:
@@ -557,10 +587,19 @@ class EcoPlotsBase:
         if kwargs:
             input_filters.update(kwargs)
 
-        # 1. Validate allowed keys
-        invalid_keys = set(input_filters) - set(QUERY_FACETS)
+        # 1. Determine allowed facets based on mode
+        allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
+        
+        # 2. Validate allowed keys
+        invalid_keys = set(input_filters) - set(allowed_facets)
         if invalid_keys:
-            raise EcoPlotsError(f"Invalid filter keys: {invalid_keys}. Allowed: {QUERY_FACETS}")
+            raise EcoPlotsError(f"Invalid filter keys: {invalid_keys}. Allowed: {allowed_facets}")
+
+        # Protect persistent dataset in samples mode
+        if self._mode == "samples" and "dataset" in input_filters:
+            raise EcoPlotsError(
+                "Cannot remove 'dataset' when in 'samples' mode. The dataset 'TERN Surveillance' is required and protected."
+            )
 
         removed_facets = set()
 
@@ -618,8 +657,13 @@ class EcoPlotsBase:
         Returns:
             self (chainable)
         """
-        self._filters = {}
-        self._query_filters = {}
+        # Preserve persistent dataset when in samples mode
+        if self._mode == "samples":
+            self._filters = {"dataset": ["TERN Surveillance"]}
+            self._query_filters = {"dataset": ["http://linked.data.gov.au/dataset/ausplots"]}
+        else:
+            self._filters = {}
+            self._query_filters = {}
         return self
 
     def get_filter(self, facet: Optional[str] = None) -> Union[list, dict, None]:
@@ -706,6 +750,134 @@ class EcoPlotsBase:
         resp = requests.post(url, json=payload, timeout=60)
         resp.raise_for_status()
         return orjson.loads(resp.content)
+    
+    def discover_samples(
+        self,
+        discovery_facet: str,
+        region_type: Optional[str] = None,
+    ) -> dict:
+        """Resolve and call the discovery endpoint for samples.
+
+        Args:
+            discovery_facet: Facet to discover (must resolve via SAMPLE_DISCOVERY_FACETS).
+            region_type: Optional region type used when discovering regions.
+                Required when discovery_facet is "region".
+
+        Returns:
+            Parsed JSON payload returned by the discovery endpoint.
+
+        Raises:
+            EcoPlotsError: If the facet cannot be resolved or region_type is missing
+                when discovering regions.
+
+        Notes:
+            - Internal use only
+            - A 60-second request timeout is enforced.
+        """
+        from ._config import SAMPLE_DISCOVERY_FACETS
+
+        facet_param = resolve_facet(discovery_facet, SAMPLE_DISCOVERY_FACETS)
+
+        if not facet_param:
+            raise EcoPlotsError(f"Invalid discovery facet: {discovery_facet}")
+        
+        if discovery_facet == "dataset":
+            # hardcoded, doesn't change
+            return [{
+                "key": "TERN Ecosystem Surveillance",
+                "uri": "http://linked.data.gov.au/dataset/ausplots",
+            }]
+
+        url = f"{self._base_url}/api/v1.0/ui/facet/samples"
+
+        # Build query with only the facets defined in SAMPLE_DISCOVERY_FACETS
+        query = {}
+        for facet in SAMPLE_DISCOVERY_FACETS:
+            # Skip region_type if we're discovering regions; will be resolved from args
+            if discovery_facet == "region" and facet == "region_type":
+                continue
+            if facet in self._query_filters:
+                query[facet] = self._query_filters[facet]
+
+        # When discovering regions, resolve region_type from args and add to query
+        if discovery_facet == "region":
+            if not region_type:
+                raise EcoPlotsError("region_type is required when discovering regions")
+            facet, urls, matched, unmatched, corrected = validate_facet(
+                "region_type", [region_type]
+            )
+            if urls:
+                query["region_type"] = urls
+            else:
+                raise EcoPlotsError(f"Could not resolve region_type: {region_type}")
+
+        payload = {"query": query}
+
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+
+        # Parse JSON from response text
+        parsed = orjson.loads(resp.text)
+
+        if discovery_facet == "region_type":
+            # Ensure we have a list
+            parsed = parsed["aggregations"]["region_type"]["buckets"]
+            if not isinstance(parsed, list):
+                return []
+            
+            # Remove doc_count and add uri from cache
+            with Cache(CACHE_DIR) as cache:
+                region_type_map = cache.get("region_type", {})
+                for res in parsed:
+                    if isinstance(res, dict):
+                        res.pop("doc_count", None)
+                        key = res.get("key")
+                        res["uri"] = key
+                        res["key"] = region_type_map.get(key, "N/A")
+        
+        elif discovery_facet == "region":
+            # Ensure we have a list
+            parsed = parsed["aggregations"]["region"]["buckets"]
+            if not isinstance(parsed, list):
+                return []
+            
+            # Remove doc_count and add uri from cache
+            with Cache(CACHE_DIR) as cache:
+                region_map = cache.get("region", {})
+                for res in parsed:
+                    if isinstance(res, dict):
+                        res.pop("doc_count", None)
+                        key = res.get("key")
+                        res["uri"] = key
+                        res["key"] = region_map.get(key, "N/A")
+
+        elif discovery_facet == "material_sample_type":
+            parsed = parsed["aggregations"][facet_param]["value"]["buckets"]
+            if not isinstance(parsed, list):
+                return []
+            
+            for res in parsed:
+                if isinstance(res, dict):
+                    res.pop("doc_count", None)
+                    key = res.get("key")
+                    res["uri"] = key
+                    res["key"] = MATERIAL_SAMPLE_TYPE_MAP.get(key, "N/A")
+
+        elif discovery_facet in ("site_id", "used_procedure"):
+            parsed = parsed["aggregations"][facet_param]["value"]["buckets"]
+            if not isinstance(parsed, list):
+                return []
+            
+            with Cache(CACHE_DIR) as cache:
+                facet_map = cache.get(facet_param, {})
+                for res in parsed:
+                    if isinstance(res, dict):
+                        res.pop("doc_count", None)
+                        key = res.get("key")
+                        res["uri"] = key
+                        res["key"] = facet_map.get(key, "N/A")
+
+        return parsed
 
     async def fetch_data(
         self,
@@ -776,6 +948,79 @@ class EcoPlotsBase:
                     # For GeoJSON, parse the complete JSON response
                     complete_data = ''.join(chunks)
                     return orjson.loads(complete_data)
+
+    async def fetch_samples_data(self):
+        """Fetch sample data from the samples endpoint.
+
+        Returns data as a geopandas GeoDataFrame extracted from the _source field
+        of response hits.
+
+        Returns:
+            A geopandas GeoDataFrame with sample data.
+
+        Raises:
+            EcoPlotsError: If material_sample_type is not selected or if multiple
+                material_sample_types are selected (only one allowed).
+
+        Notes:
+            - Timeout is 300s (5 min)
+            - material_sample_type is required and must be single-valued
+            - Intended for internal use only
+        """
+        try:
+            import geopandas
+        except ImportError:
+            raise EcoPlotsError(
+                "geopandas is required for fetch_samples_data(). "
+                "Install it with: pip install geopandas"
+            )
+
+        # Check that material_sample_type is present
+        if "material_sample_type" not in self._query_filters:
+            self._display_warning(
+                "material_sample_type must be selected to fetch samples data. "
+                "Please select a material_sample_type using select()."
+            )
+            return geopandas.GeoDataFrame()
+
+        # Check that only one material_sample_type is provided
+        material_sample_types = self._query_filters.get("material_sample_type", [])
+        if len(material_sample_types) != 1:
+            raise EcoPlotsError(
+                f"Exactly one material_sample_type must be selected, "
+                f"got {len(material_sample_types)}"
+            )
+
+        payload = {
+            "query": copy.deepcopy(self._query_filters),
+            "context": "samples"
+        }
+
+        timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{self._base_url}/api/v1.0/ui/data/samples",
+                json=payload,
+                timeout=timeout,
+            ) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+
+        # Extract hits from response
+        hits = data.get("hits", {}).get("hits", [])
+
+        if not hits:
+            self._display_warning("No sample data found for the current filters.")
+            return geopandas.GeoDataFrame()
+
+        # Extract _source from each hit
+        records = [hit.get("_source", {}) for hit in hits]
+
+        # Convert list of records to GeoDataFrame
+        gdf = geopandas.GeoDataFrame(records)
+
+        return gdf
 
     def discover_attributes(
         self,
