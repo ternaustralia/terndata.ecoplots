@@ -67,6 +67,7 @@ Next steps
 - :doc:`Package overview <api/overview>`
 - :doc:`EcoPlots Client <api/ecoplots_class>`
 - :doc:`Async EcoPlots client <api/async_ecoplots_class>`
+- :doc:`Change log <changelog>`
 
 .. toctree::
    :hidden:
@@ -78,4 +79,5 @@ Next steps
    :hidden:
    :maxdepth: 1
 
-   internals
+  internals
+  changelog

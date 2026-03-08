@@ -388,6 +388,12 @@ class EcoPlots(EcoPlotsBase):
                 - "pandas" (or 'pd'): returns a pandas DataFrame.
                 - "geopandas" (or 'gpd') (default): returns a GeoDataFrame.
 
+                In "samples" mode, only "pandas"/"pd" and "geopandas"/"gpd"
+                are supported (no "geojson"/"json").
+
+                In "samples" mode, exactly one ``material_sample_type`` must be
+                selected at a time.
+
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
             EcoPlotsError: If an invalid dformat is provided.
@@ -395,6 +401,18 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             Data in the requested format.
         """
+        if self._mode == "samples":
+            if dformat not in ("pandas", "geopandas", "pd", "gpd"):
+                raise EcoPlotsError(
+                    "In 'samples' mode, supported dformat values are: "
+                    "'pandas' (or 'pd') and 'geopandas' (or 'gpd')."
+                )
+
+            samples_gdf = cast(gpd.GeoDataFrame, _run_sync(self.fetch_samples_data()))
+            if dformat in ("pandas", "pd"):
+                return pd.DataFrame(samples_gdf)
+            return samples_gdf
+
         if not self._query_filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
@@ -507,6 +525,12 @@ class AsyncEcoPlots(EcoPlots):
                 - "pandas" (or "pd"): returns a pandas DataFrame.
                 - "geopandas" (or "gpd") (default): returns a GeoDataFrame.
 
+                In "samples" mode, only "pandas"/"pd" and "geopandas"/"gpd"
+                are supported (no "geojson"/"json").
+
+                In "samples" mode, exactly one ``material_sample_type`` must be
+                selected at a time.
+
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
             EcoPlotsError: If an invalid dformat is provided.
@@ -515,6 +539,18 @@ class AsyncEcoPlots(EcoPlots):
         Returns:
             Data in the requested format.
         """
+        if self._mode == "samples":
+            if dformat not in ("pandas", "geopandas", "pd", "gpd"):
+                raise EcoPlotsError(
+                    "In 'samples' mode, supported dformat values are: "
+                    "'pandas' (or 'pd') and 'geopandas' (or 'gpd')."
+                )
+
+            samples_gdf = cast(gpd.GeoDataFrame, await self.fetch_samples_data())
+            if dformat in ("pandas", "pd"):
+                return pd.DataFrame(samples_gdf)
+            return samples_gdf
+
         if not self._filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
