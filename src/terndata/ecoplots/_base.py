@@ -1014,11 +1014,156 @@ class EcoPlotsBase:
             self._display_warning("No sample data found for the current filters.")
             return geopandas.GeoDataFrame()
 
-        # Extract _source from each hit
-        records = [hit.get("_source", {}) for hit in hits]
+        def _extract_value_field(raw_value):
+            if isinstance(raw_value, list) and raw_value and isinstance(raw_value[0], dict):
+                return raw_value[0].get("value")
+            if isinstance(raw_value, dict):
+                return raw_value.get("value")
+            return None
+
+        def _extract_label_field(raw_value):
+            if isinstance(raw_value, list) and raw_value and isinstance(raw_value[0], dict):
+                candidate = raw_value[0]
+            elif isinstance(raw_value, dict):
+                candidate = raw_value
+            else:
+                return None
+
+            if "label" in candidate:
+                return candidate.get("label")
+
+            value = candidate.get("value")
+            if isinstance(value, list) and value and isinstance(value[0], dict):
+                return value[0].get("label") or value[0].get("value")
+            if isinstance(value, dict):
+                return value.get("label") or value.get("value")
+
+            current = candidate.get("current")
+            if isinstance(current, list) and current and isinstance(current[0], dict):
+                return current[0].get("label") or current[0].get("value")
+            if isinstance(current, dict):
+                return current.get("label") or current.get("value")
+
+            return None
+
+        def _resolve_vocab_value(raw_value, vocab_map):
+            if isinstance(raw_value, list):
+                resolved = [vocab_map.get(v, v) for v in raw_value if v is not None]
+                if not resolved:
+                    return None
+                return resolved[0] if len(resolved) == 1 else resolved
+            if raw_value is None:
+                return None
+            return vocab_map.get(raw_value, raw_value)
+
+        records = []
+        with Cache(CACHE_DIR) as cache:
+            dataset_map = cache.get("dataset", {}) or {}
+            feature_type_map = cache.get("feature_type", {}) or {}
+            site_visit_id_map = cache.get("site_visit_id", {}) or {}
+            used_procedure_map = cache.get("used_procedure", {}) or {}
+
+            dropped_fields = {
+                "dataset_attr_count",
+                "direct_site_id",
+                "geographic_information",
+                "observed_property",
+                "obsverved_property",
+                "related_samples",
+                "sample_attr_count",
+                "sample_information",
+                "site_attr_count",
+                "sites_hierarchy",
+                "site_hierarchy",
+                "site_hirarchy",
+                "site_visit_attr_count",
+            }
+
+            for hit in hits:
+                source = hit.get("_source", {})
+                if not isinstance(source, dict):
+                    continue
+
+                cleaned = {}
+
+                for key, value in source.items():
+                    # Drop explicit fields and region* columns
+                    if key in {"geopoint", "tags"} or key.startswith("region"):
+                        continue
+
+                    if key in dropped_fields:
+                        continue
+
+                    # Flatten and rename igsn_information -> igsn
+                    if key == "igsn_information":
+                        igsn_val = None
+                        if isinstance(value, list) and value and isinstance(value[0], dict):
+                            nested_value = value[0].get("value")
+                            if isinstance(nested_value, dict):
+                                igsn_val = nested_value.get("label")
+                        if igsn_val is not None:
+                            cleaned["igsn"] = igsn_val
+                        continue
+
+                    # Flatten and rename visit_start_date -> visit_date
+                    if key == "visit_start_date":
+                        visit_date = _extract_value_field(value)
+                        if visit_date is not None:
+                            cleaned["visit_date"] = visit_date
+                        continue
+
+                    # Resolve used_procedure labels from cache
+                    if key == "used_procedure":
+                        resolved_used_procedure = _resolve_vocab_value(value, used_procedure_map)
+                        if resolved_used_procedure is not None:
+                            cleaned["used_procedure"] = resolved_used_procedure
+                        continue
+
+                    if key == "dataset":
+                        resolved_dataset = _resolve_vocab_value(value, dataset_map)
+                        if resolved_dataset is not None:
+                            cleaned["dataset"] = resolved_dataset
+                        continue
+
+                    if key == "feature_type":
+                        resolved_feature_type = _resolve_vocab_value(value, feature_type_map)
+                        if resolved_feature_type is not None:
+                            cleaned["feature_type"] = resolved_feature_type
+                        continue
+
+                    if key == "site_visit_id":
+                        resolved_site_visit_id = _resolve_vocab_value(value, site_visit_id_map)
+                        if resolved_site_visit_id is not None:
+                            cleaned["site_visit_id"] = resolved_site_visit_id
+                        continue
+
+                    if key == "material_sample_type":
+                        resolved_material_sample_type = _resolve_vocab_value(
+                            value, MATERIAL_SAMPLE_TYPE_MAP
+                        )
+                        if resolved_material_sample_type is not None:
+                            cleaned["material_sample_type"] = resolved_material_sample_type
+                        continue
+
+                    # Remove all null-valued fields
+                    if value is not None:
+                        cleaned[key] = value
+
+                records.append(cleaned)
 
         # Convert list of records to GeoDataFrame
         gdf = geopandas.GeoDataFrame(records)
+
+        # Drop columns that are entirely null after normalization
+        if not gdf.empty:
+            gdf = gdf.dropna(axis=1, how="all")
+
+            if "sample_images" in gdf.columns:
+                has_any_sample_image = gdf["sample_images"].apply(
+                    lambda v: isinstance(v, list) and len(v) > 0
+                ).any()
+                if not has_any_sample_image:
+                    gdf = gdf.drop(columns=["sample_images"])
 
         return gdf
 

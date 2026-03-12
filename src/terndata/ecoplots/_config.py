@@ -3,7 +3,7 @@ import tempfile
 
 # Default configuration
 
-VERSION = "0.0.4-beta"
+VERSION = "0.0.5-beta"
 
 API_BASE_URL = "http://ecoplots-test.tern.org.au"
 
