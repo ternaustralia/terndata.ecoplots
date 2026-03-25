@@ -3,7 +3,7 @@ import tempfile
 
 # Default configuration
 
-VERSION = "0.0.5-beta"
+VERSION = "0.0.6-beta"
 
 API_BASE_URL = "http://ecoplots-test.tern.org.au"
 
@@ -47,6 +47,7 @@ SAMPLE_QUERY_FACETS = [
     "site_id",
     "material_sample_type",
     "used_procedure",
+    "has_image",
     "spatial",
 ]
 
@@ -64,6 +65,7 @@ SAMPLE_DISCOVERY_FACETS = [
     "material_sample_type",
     "site_id",
     "used_procedure",
+    "sample_name",
 ]
 
 DISCOVERY_ATTRIBUTES = [

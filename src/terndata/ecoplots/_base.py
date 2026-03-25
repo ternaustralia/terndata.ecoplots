@@ -537,6 +537,18 @@ class EcoPlotsBase:
         for k, v in input_filters.items():
             if v is None:
                 continue
+            if k == "has_image":
+                if self._mode != "samples":
+                    raise EcoPlotsError("'has_image' filter is only available in 'samples' mode.")
+                if isinstance(v, (list, tuple)):
+                    if len(v) != 1:
+                        raise EcoPlotsError("'has_image' accepts a single boolean value.")
+                    v = v[0]
+                if not isinstance(v, bool):
+                    raise EcoPlotsError("'has_image' must be a boolean (True/False).")
+                self._filters["has_image"] = [v]
+                self._query_filters["has_image"] = v
+                continue
             if k == "spatial":
                 _validate_spatial_input(v)  # validate spatial filter
                 # replace any existing spatial filter
@@ -813,7 +825,16 @@ class EcoPlotsBase:
 
         payload = {"query": query}
 
-        resp = requests.post(url, json=payload, timeout=60)
+        params = []
+        if discovery_facet == "sample_name":
+            params.append(("facet", facet_param))
+
+        resp = requests.post(
+            url,
+            params=params if params else None,
+            json=payload,
+            timeout=60,
+        )
         resp.raise_for_status()
 
         # Parse JSON from response text
@@ -876,6 +897,15 @@ class EcoPlotsBase:
                         key = res.get("key")
                         res["uri"] = key
                         res["key"] = facet_map.get(key, "N/A")
+
+        elif discovery_facet == "sample_name":
+            parsed = parsed["aggregations"][facet_param]["value"]["buckets"]
+            if not isinstance(parsed, list):
+                return []
+
+            for res in parsed:
+                if isinstance(res, dict):
+                    res.pop("doc_count", None)
 
         return parsed
 
@@ -996,19 +1026,62 @@ class EcoPlotsBase:
             "context": "samples"
         }
 
+        has_image = bool(payload["query"].pop("has_image", False))
+
+        if has_image:
+            payload["has_image"] = True
+
         timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self._base_url}/api/v1.0/ui/data/samples",
-                json=payload,
-                timeout=timeout,
-            ) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
+            try:
+                async with session.post(
+                    f"{self._base_url}/api/v1.0/ui/data/samples",
+                    json=payload,
+                    timeout=timeout,
+                ) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+            except aiohttp.ClientResponseError as exc:
+                if has_image and exc.status >= 500:
+                    self._display_warning(
+                        "Server rejected 'has_image=true'. Retrying without has_image "
+                        "and filtering image rows client-side."
+                    )
+                    fallback_payload = {
+                        "query": copy.deepcopy(self._query_filters),
+                        "context": "samples",
+                    }
+                    async with session.post(
+                        f"{self._base_url}/api/v1.0/ui/data/samples",
+                        json=fallback_payload,
+                        timeout=timeout,
+                    ) as resp:
+                        resp.raise_for_status()
+                        data = await resp.json()
+                else:
+                    raise
 
         # Extract hits from response
         hits = data.get("hits", {}).get("hits", [])
+
+        if has_image:
+            def _has_sample_images(value):
+                if not isinstance(value, list):
+                    return False
+                for item in value:
+                    if isinstance(item, str) and item.strip():
+                        return True
+                    if isinstance(item, dict):
+                        for url in item.values():
+                            if isinstance(url, str) and url.strip():
+                                return True
+                return False
+
+            hits = [
+                hit for hit in hits
+                if _has_sample_images((hit.get("_source", {}) or {}).get("sample_images"))
+            ]
 
         if not hits:
             self._display_warning("No sample data found for the current filters.")
@@ -1350,7 +1423,9 @@ class EcoPlotsBase:
         if "spatial" in all_matched:
             query_filters["spatial"] = all_matched["spatial"]
 
-        to_validate = {k: v for k, v in self._filters.items() if k != "spatial"}
+        to_validate = {
+            k: v for k, v in self._filters.items() if k not in {"spatial", "has_image"}
+        }
 
         with ThreadPoolExecutor() as executor:
             futures = {
@@ -1390,7 +1465,10 @@ class EcoPlotsBase:
             )
             raise EcoPlotsError(msg)
 
-        data = self.summarise_data(query_filters=query_filters)
+        summary_query_filters = copy.deepcopy(query_filters)
+        summary_query_filters.pop("has_image", None)
+
+        data = self.summarise_data(query_filters=summary_query_filters)
         if data.get("total_doc", 0) == 0:
             self._display_warning(
                 "The applied filters result in zero matching records. "
@@ -1431,6 +1509,12 @@ class EcoPlotsBase:
                 ]
             }
         }
+
+        if self._mode == "samples":
+            payload["context"] = "samples"
+            has_image = payload["query"].pop("has_image", None)
+            if has_image is True:
+                payload["has_image"] = True
        
         resp = requests.post(
             f"{self._base_url}/api/v1.0/ui/map/clusters",

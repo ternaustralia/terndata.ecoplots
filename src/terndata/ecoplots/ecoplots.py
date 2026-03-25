@@ -44,7 +44,7 @@ from diskcache import Cache
 from ._base import EcoPlotsBase
 from ._config import CACHE_DIR
 from ._exceptions import EcoPlotsError
-from ._gui import spatial_selector
+from ._gui import igsn_viewer, sample_image_viewer, spatial_selector
 from ._utils import (
     _align_and_concat,
     _run_sync,
@@ -375,8 +375,75 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover_samples("material_sample_type")
         return pd.DataFrame(data)
 
+    def get_sample_igsn(self) -> pd.DataFrame:
+        """Get sample names and derived IGSN values.
+
+        Available only in ``samples`` mode. This method discovers
+        ``sample_name`` values using the current query filters and the
+        supplied URL parameter, then returns a DataFrame with:
+        - ``sample_name``: sample name with alphabetic characters capitalized.
+        - ``igsn``: derived as ``10.60792/{sample_name_raw}``.
+
+        Returns:
+            A DataFrame with columns ``sample_name`` and ``igsn``.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than ``samples``.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Sample IGSN lookup is only available in 'samples' mode.")
+
+        data = self.discover_samples("sample_name")
+
+        rows = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            sample_name_raw = item.get("key")
+            if not isinstance(sample_name_raw, str) or not sample_name_raw:
+                continue
+
+            sample_name = "".join(
+                ch.upper() if ch.isalpha() else ch for ch in sample_name_raw
+            )
+            rows.append(
+                {
+                    "sample_name": sample_name,
+                    "igsn": f"10.60792/{sample_name_raw}",
+                }
+            )
+
+        return pd.DataFrame(rows, columns=["sample_name", "igsn"])
+
+    def view_sample_igsn(self, igsn: Optional[str] = None):
+        """Open an interactive notebook viewer for sample IGSN DOI pages.
+
+        Available only in ``samples`` mode. This method discovers sample names,
+        builds IGSN values, and displays either:
+        - a dropdown + iframe widget (default), or
+        - a single iframe for a provided IGSN/DOI value.
+
+        Args:
+            igsn: Optional IGSN value or DOI URL. Accepted inputs include
+                ``10.60792/...``, ``doi.org/10.60792/...``, and
+                ``https://doi.org/10.60792/...``.
+
+        Returns:
+            ipywidgets.VBox: Interactive IGSN viewer widget.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than ``samples``.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("IGSN viewer is only available in 'samples' mode.")
+
+        igsn_df = self.get_sample_igsn()
+        return igsn_viewer(igsn_df, igsn=igsn)
+
     def get_data(
-        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
+        self,
+        allow_full_download: Optional[bool] = False,
+        dformat: Optional[str] = "gpd",
     ) -> gpd.GeoDataFrame:
         """Retrieve EcoPlots data based on the current filters.
 
@@ -469,6 +536,64 @@ class EcoPlots(EcoPlotsBase):
         """
         return spatial_selector(self, **kwargs)
 
+    def view_sample_images(
+        self,
+        data: Optional[pd.DataFrame] = None,
+        image_column: str = "sample_images",
+        sample_id_column: str = "sample_id",
+        sample_name_column: str = "sample_name",
+        scientific_name_column: str = "scientific_name",
+    ):
+        """Open an interactive notebook image browser for sample images.
+
+        Args:
+            data: Optional DataFrame to browse. If omitted, data is fetched in
+                samples mode using current filters.
+            image_column: Name of image column in dataframe.
+            sample_id_column: Name of sample identifier column in dataframe.
+            sample_name_column: Name of sample name column in dataframe.
+            scientific_name_column: Name of scientific name column in dataframe.
+
+        Returns:
+            ipywidgets.VBox: Interactive viewer widget.
+        """
+        if data is None:
+            if self._mode != "samples":
+                raise EcoPlotsError("Sample image viewer is only available in 'samples' mode.")
+
+            has_image_selected = bool(self._query_filters.get("has_image", False))
+            if not has_image_selected:
+                raise EcoPlotsError(
+                    "To inspect images, set has_image via select(), for example: "
+                    "select(has_image=True)."
+                )
+
+            plant_voucher_uri = (
+                "http://linked.data.gov.au/def/tern-cv/18317af1-7c83-468d-883e-ba791500c6e3"
+            )
+            selected_mst = self._query_filters.get("material_sample_type", [])
+            if plant_voucher_uri not in selected_mst:
+                raise EcoPlotsError(
+                    "Image viewer currently requires material_sample_type to be "
+                    "'Plant Voucher Specimen'. Please select it before viewing images."
+                )
+
+            fetched = self.get_data(dformat="pd")
+            if asyncio.iscoroutine(fetched):
+                fetched = _run_sync(fetched)
+            data = cast(pd.DataFrame, fetched)
+
+        if not isinstance(data, pd.DataFrame):
+            data = pd.DataFrame(data)
+
+        return sample_image_viewer(
+            data,
+            image_column=image_column,
+            sample_id_column=sample_id_column,
+            sample_name_column=sample_name_column,
+            scientific_name_column=scientific_name_column,
+        )
+
 
 class AsyncEcoPlots(EcoPlots):
     """High-level **async** client for the EcoPlots REST API.
@@ -513,7 +638,9 @@ class AsyncEcoPlots(EcoPlots):
         super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
     async def get_data(
-        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
+        self,
+        allow_full_download: Optional[bool] = False,
+        dformat: Optional[str] = "gpd",
     ) -> gpd.GeoDataFrame:  # noqa: DAR401
         """Retrieve EcoPlots data asynchronously based on the current filters.
 
