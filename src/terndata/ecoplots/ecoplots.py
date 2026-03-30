@@ -42,7 +42,7 @@ import pandas as pd
 from diskcache import Cache
 
 from ._base import EcoPlotsBase
-from ._config import CACHE_DIR
+from ._config import CACHE_DIR, MATERIAL_SAMPLE_TYPE_MAP
 from ._exceptions import EcoPlotsError
 from ._gui import igsn_viewer, sample_image_viewer, spatial_selector
 from ._utils import (
@@ -348,7 +348,7 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover_attributes("observation")
         uris = data.get("observation_attributes", []) or []
         rows = []
-        with Cache(CACHE_DIR) as cache:  # or self.CACHE_DIR if that's how you store it
+        with Cache(CACHE_DIR) as cache:
             obs_map = cache.get("attributes", {}) or {}
             for uri in uris:
                 val = obs_map.get(uri)
@@ -375,12 +375,46 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover_samples("material_sample_type")
         return pd.DataFrame(data)
 
+    def _ensure_required_material_sample_types(self, required_labels: list[str], context: str) -> None:
+        """Ensure required material sample types are selected for a workflow.
+
+        Args:
+            required_labels: Human-readable material sample type labels that must
+                be present in the current ``material_sample_type`` selection.
+            context: Short workflow name used in error messages.
+
+        Raises:
+            EcoPlotsError: If one or more required sample types are not selected.
+        """
+        label_to_uri = {label: uri for uri, label in MATERIAL_SAMPLE_TYPE_MAP.items()}
+        selected = self._query_filters.get("material_sample_type", [])
+        if isinstance(selected, str):
+            selected_uris = {selected}
+        else:
+            selected_uris = set(selected)
+
+        missing = []
+        for label in required_labels:
+            uri = label_to_uri.get(label)
+            if uri is None or uri not in selected_uris:
+                missing.append(label)
+
+        if missing:
+            selected_labels = [
+                MATERIAL_SAMPLE_TYPE_MAP.get(uri, uri) for uri in sorted(selected_uris)
+            ]
+            selected_display = ", ".join(selected_labels) if selected_labels else "none"
+            raise EcoPlotsError(
+                f"{context} requires material_sample_type to include: "
+                f"{', '.join(required_labels)}. Currently selected: {selected_display}."
+            )
+
     def get_sample_igsn(self) -> pd.DataFrame:
         """Get sample names and derived IGSN values.
 
         Available only in ``samples`` mode. This method discovers
-        ``sample_name`` values using the current query filters and the
-        supplied URL parameter, then returns a DataFrame with:
+        ``sample_name`` values using the current query filters, then returns
+        a DataFrame with:
         - ``sample_name``: sample name with alphabetic characters capitalized.
         - ``igsn``: derived as ``10.60792/{sample_name_raw}``.
 
@@ -439,6 +473,74 @@ class EcoPlots(EcoPlotsBase):
 
         igsn_df = self.get_sample_igsn()
         return igsn_viewer(igsn_df, igsn=igsn)
+    
+    def get_soil_depth_range(self) -> gpd.GeoDataFrame:
+        """Get the soil depth range for the current filters.
+
+        Available only in "samples" mode.
+
+        Returns:
+            A GeoDataFrame containing aggregated soil depth range values.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+            EcoPlotsError: If required material sample types are not selected.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Soil depth range is only available in 'samples' mode.")
+
+        self._ensure_required_material_sample_types(
+            ["Soil Subsite Sample", "Soil Pit Sample"],
+            "Soil depth range",
+        )
+
+        return cast(gpd.GeoDataFrame, self.discover_soil_depth_range())
+
+    def get_soilpit(self) -> pd.DataFrame:
+        """Get soil pit distribution for the current filters.
+
+        Available only in "samples" mode.
+
+        Returns:
+            A DataFrame with two columns: ``soilpit`` and ``counts``.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+            EcoPlotsError: If required material sample types are not selected.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Soil pit distribution is only available in 'samples' mode.")
+
+        self._ensure_required_material_sample_types(
+            ["Soil Metagenomic Sample", "Soil Subsite Sample"],
+            "Soil pit distribution",
+        )
+
+        return cast(pd.DataFrame, self.discover_soilpit())
+
+    def get_speciesname(self) -> pd.DataFrame:
+        """Get species name distribution for the current filters.
+
+        Available only in "samples" mode.
+
+        This method preserves all current query filters, including ``has_image``.
+
+        Returns:
+            A DataFrame with two columns: ``speciesname`` and ``count``.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+            EcoPlotsError: If required material sample types are not selected.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Species distribution is only available in 'samples' mode.")
+
+        self._ensure_required_material_sample_types(
+            ["Plant Tissue Sample", "Plant Voucher Specimen"],
+            "Species distribution",
+        )
+
+        return cast(pd.DataFrame, self.discover_speciesname())
 
     def get_data(
         self,

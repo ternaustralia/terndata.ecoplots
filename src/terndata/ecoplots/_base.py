@@ -823,7 +823,7 @@ class EcoPlotsBase:
             else:
                 raise EcoPlotsError(f"Could not resolve region_type: {region_type}")
 
-        payload = {"query": query}
+        payload = {"query": query, "has_image": self._query_filters.get("has_image", False)}
 
         params = []
         if discovery_facet == "sample_name":
@@ -908,6 +908,172 @@ class EcoPlotsBase:
                     res.pop("doc_count", None)
 
         return parsed
+    
+
+    def discover_soil_depth_range(self):
+        """Discover soil depth range aggregates for the current query.
+
+        Sends the current samples query to the ``/samples/soildepth`` endpoint and
+        returns a single-row GeoDataFrame with descriptive depth summary columns.
+
+        Returns:
+            geopandas.GeoDataFrame: One-row table with soil depth aggregate values.
+
+        Raises:
+            EcoPlotsError: If called outside ``samples`` mode.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Soil depth range discovery is only available in 'samples' mode.")
+
+        try:
+            import geopandas
+        except ImportError:
+            raise EcoPlotsError(
+                "geopandas is required for discover_soil_depth_range(). "
+                "Install it with: pip install geopandas"
+            )
+
+        payload = {"query": copy.deepcopy(self._query_filters)}
+        # Keep payload compatible with discovery-style samples endpoints.
+
+        resp = requests.post(
+            f"{self._base_url}/api/v1.0/samples/soildepth",
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+
+        parsed = orjson.loads(resp.content)
+        aggs = parsed.get("aggregations", {}) if isinstance(parsed, dict) else {}
+
+        def _value(key: str):
+            node = aggs.get(key, {})
+            if isinstance(node, dict):
+                return node.get("value")
+            return None
+
+        def _range_text(min_key: str, max_key: str):
+            low = _value(min_key)
+            high = _value(max_key)
+            if low is None or high is None:
+                return None
+            return f"{low}-{high} m"
+
+        row = {
+            "overall_depth_min_meter": _value("min_soil_depth_min"),
+            "overall_depth_max_meter": _value("max_soil_depth_max"),
+            "min_depth_range": _range_text("min_soil_depth_min", "min_soil_depth_max"),
+            "max_depth_range": _range_text("max_soil_depth_min", "max_soil_depth_max"),
+        }
+
+        return geopandas.GeoDataFrame([row])
+
+    def discover_soilpit(self):
+        """Discover soil pit distribution for the current samples query.
+
+        Sends the current query to the ``/samples/soilpit`` endpoint and returns
+        a two-column table with the soil pit identifier and its document count.
+
+        Returns:
+            pandas.DataFrame: Columns are ``soilpit`` and ``counts``.
+
+        Raises:
+            EcoPlotsError: If called outside ``samples`` mode.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Soil pit discovery is only available in 'samples' mode.")
+
+        try:
+            import pandas as pd
+        except ImportError:
+            raise EcoPlotsError(
+                "pandas is required for discover_soilpit(). Install it with: pip install pandas"
+            )
+
+        payload = {"query": copy.deepcopy(self._query_filters)}
+
+        resp = requests.post(
+            f"{self._base_url}/api/v1.0/samples/soilpit",
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+
+        parsed = orjson.loads(resp.content)
+        buckets = (
+            (((parsed or {}).get("aggregations", {}) or {}).get("soil_subsite_id", {}) or {})
+            .get("value", {})
+            .get("buckets", [])
+        )
+
+        rows = []
+        if isinstance(buckets, list):
+            for bucket in buckets:
+                if not isinstance(bucket, dict):
+                    continue
+                rows.append(
+                    {
+                        "soilpit": bucket.get("key"),
+                        "counts": bucket.get("doc_count"),
+                    }
+                )
+
+        return pd.DataFrame(rows, columns=["soilpit", "counts"])
+
+    def discover_species(self):
+        """Discover species name distribution for the current samples query.
+
+        Sends the current query to the ``/samples/speciesname`` endpoint and
+        returns a two-column table with species name and document count.
+
+        Notes:
+            - Preserves all query filters including ``has_image``.
+
+        Returns:
+            pandas.DataFrame: Columns are ``speciesname`` and ``count``.
+
+        Raises:
+            EcoPlotsError: If called outside ``samples`` mode.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Species discovery is only available in 'samples' mode.")
+
+        try:
+            import pandas as pd
+        except ImportError:
+            raise EcoPlotsError(
+                "pandas is required for discover_speciesname(). Install it with: pip install pandas"
+            )
+
+        payload = {"query": copy.deepcopy(self._query_filters)}
+
+        resp = requests.post(
+            f"{self._base_url}/api/v1.0/samples/speciesname",
+            json=payload,
+            timeout=30,
+        )
+        resp.raise_for_status()
+
+        parsed = orjson.loads(resp.content)
+        buckets = (
+            (((parsed or {}).get("aggregations", {}) or {}).get("speciesname", {}) or {})
+            .get("value", {})
+            .get("buckets", [])
+        )
+
+        rows = []
+        if isinstance(buckets, list):
+            for bucket in buckets:
+                if not isinstance(bucket, dict):
+                    continue
+                rows.append(
+                    {
+                        "speciesname": bucket.get("key"),
+                        "count": bucket.get("doc_count"),
+                    }
+                )
+
+        return pd.DataFrame(rows, columns=["speciesname", "count"])
 
     async def fetch_data(
         self,
