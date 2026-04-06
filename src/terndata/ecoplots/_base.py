@@ -17,6 +17,7 @@ from typing import (
 import aiohttp
 import orjson
 import requests
+from rapidfuzz import fuzz, process
 
 from ._config import (
     API_BASE_URL,
@@ -515,6 +516,27 @@ class EcoPlotsBase:
         if kwargs:
             input_filters.update(kwargs)
 
+        if self._mode == "samples":
+            alias_map = {
+                "soil_subsite": "soil_subsite_id",
+            }
+            normalized_input = {}
+            for key, value in input_filters.items():
+                canonical_key = alias_map.get(key, key)
+                if canonical_key in normalized_input and value is not None:
+                    existing = normalized_input[canonical_key]
+                    if isinstance(existing, list):
+                        if isinstance(value, (list, tuple)):
+                            existing.extend(list(value))
+                        else:
+                            existing.append(value)
+                        normalized_input[canonical_key] = existing
+                    else:
+                        normalized_input[canonical_key] = value
+                else:
+                    normalized_input[canonical_key] = value
+            input_filters = normalized_input
+
         # 1. Determine allowed facets based on mode
         allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
         
@@ -537,22 +559,85 @@ class EcoPlotsBase:
         for k, v in input_filters.items():
             if v is None:
                 continue
-            if k == "has_image":
+            if k == "has_images":
                 if self._mode != "samples":
-                    raise EcoPlotsError("'has_image' filter is only available in 'samples' mode.")
+                    raise EcoPlotsError("'has_images' filter is only available in 'samples' mode.")
                 if isinstance(v, (list, tuple)):
                     if len(v) != 1:
-                        raise EcoPlotsError("'has_image' accepts a single boolean value.")
+                        raise EcoPlotsError("'has_images' accepts a single boolean value.")
                     v = v[0]
                 if not isinstance(v, bool):
-                    raise EcoPlotsError("'has_image' must be a boolean (True/False).")
-                self._filters["has_image"] = [v]
-                self._query_filters["has_image"] = v
+                    raise EcoPlotsError("'has_images' must be a boolean (True/False).")
+                self._filters["has_images"] = v
+                self._query_filters["has_images"] = v
                 continue
             if k == "spatial":
                 _validate_spatial_input(v)  # validate spatial filter
                 # replace any existing spatial filter
                 self._filters["spatial"] = v
+                continue
+            if k == "soil_subsite_id":
+                if self._mode != "samples":
+                    raise EcoPlotsError(
+                        "'soil_subsite_id' filter is only available in 'samples' mode."
+                    )
+                vals = list(v) if isinstance(v, (list, tuple)) else [v]
+                normalized_subsite_ids = []
+                for raw in vals:
+                    try:
+                        subsite_id = int(raw)
+                    except (TypeError, ValueError):
+                        raise EcoPlotsError(
+                            "'soil_subsite_id' must be an integer or list of integers."
+                        )
+                    normalized_subsite_ids.append(subsite_id)
+
+                existing_ids = self._filters.get("soil_subsite_id", [])
+                if not isinstance(existing_ids, list):
+                    existing_ids = [existing_ids]
+                merged = list(existing_ids)
+                for sid in normalized_subsite_ids:
+                    if sid not in merged:
+                        merged.append(sid)
+                self._filters["soil_subsite_id"] = merged
+                continue
+            if k == "soil_depth_range":
+                if self._mode != "samples":
+                    raise EcoPlotsError(
+                        "'soil_depth_range' filter is only available in 'samples' mode."
+                    )
+
+                min_depth = None
+                max_depth = None
+
+                if isinstance(v, dict):
+                    min_depth = v.get("min")
+                    max_depth = v.get("max")
+                elif isinstance(v, (list, tuple)) and len(v) == 2:
+                    min_depth, max_depth = v
+                else:
+                    raise EcoPlotsError(
+                        "'soil_depth_range' must be [min, max], (min, max), "
+                        "or {'min': x, 'max': y}."
+                    )
+
+                try:
+                    min_depth = float(min_depth)
+                    max_depth = float(max_depth)
+                except (TypeError, ValueError):
+                    raise EcoPlotsError(
+                        "'soil_depth_range' min/max must be numeric values."
+                    )
+
+                if max_depth <= min_depth:
+                    raise EcoPlotsError(
+                        "Invalid 'soil_depth_range': max must be greater than min."
+                    )
+
+                self._filters["soil_depth_range"] = [
+                   min_depth,
+                   max_depth
+                ]
                 continue
             if not isinstance(v, (list, tuple)):
                 v = [v]
@@ -671,7 +756,7 @@ class EcoPlotsBase:
         """
         # Preserve persistent dataset when in samples mode
         if self._mode == "samples":
-            self._filters = {"dataset": ["TERN Surveillance"]}
+            self._filters = {"dataset": ["TERN Ecosystem Surveillance"]}
             self._query_filters = {"dataset": ["http://linked.data.gov.au/dataset/ausplots"]}
         else:
             self._filters = {}
@@ -811,6 +896,11 @@ class EcoPlotsBase:
             if facet in self._query_filters:
                 query[facet] = self._query_filters[facet]
 
+        # Additional query-side sample filters used by dedicated sample discovery endpoints.
+        for facet in ("soil_subsite_id", "soil_depth_range"):
+            if facet in self._query_filters:
+                query[facet] = self._query_filters[facet]
+
         # When discovering regions, resolve region_type from args and add to query
         if discovery_facet == "region":
             if not region_type:
@@ -823,7 +913,7 @@ class EcoPlotsBase:
             else:
                 raise EcoPlotsError(f"Could not resolve region_type: {region_type}")
 
-        payload = {"query": query, "has_image": self._query_filters.get("has_image", False)}
+        payload = {"query": query, "has_images": self._query_filters.get("has_images", False)}
 
         params = []
         if discovery_facet == "sample_name":
@@ -1192,10 +1282,10 @@ class EcoPlotsBase:
             "context": "samples"
         }
 
-        has_image = bool(payload["query"].pop("has_image", False))
+        has_images = bool(payload["query"].pop("has_images", False))
 
-        if has_image:
-            payload["has_image"] = True
+        if has_images:
+            payload["has_images"] = True
 
         timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
 
@@ -1209,9 +1299,9 @@ class EcoPlotsBase:
                     resp.raise_for_status()
                     data = await resp.json()
             except aiohttp.ClientResponseError as exc:
-                if has_image and exc.status >= 500:
+                if has_images and exc.status >= 500:
                     self._display_warning(
-                        "Server rejected 'has_image=true'. Retrying without has_image "
+                        "Server rejected 'has_images=true'. Retrying without has_images "
                         "and filtering image rows client-side."
                     )
                     fallback_payload = {
@@ -1231,7 +1321,7 @@ class EcoPlotsBase:
         # Extract hits from response
         hits = data.get("hits", {}).get("hits", [])
 
-        if has_image:
+        if has_images:
             def _has_sample_images(value):
                 if not isinstance(value, list):
                     return False
@@ -1463,6 +1553,11 @@ class EcoPlotsBase:
             ),
         }
 
+        if self._mode == "samples":
+            payload["context"] = "samples"
+            if "has_images" in payload["query"]:
+                payload["has_images"] = payload["query"].pop("has_images")
+
         resp = requests.post(f"{self._base_url}/api/v1.0/data/summary", json=payload, timeout=30)
         resp.raise_for_status()
         return orjson.loads(resp.content)
@@ -1589,8 +1684,93 @@ class EcoPlotsBase:
         if "spatial" in all_matched:
             query_filters["spatial"] = all_matched["spatial"]
 
+        if "soil_subsite_id" in all_matched:
+            query_filters["soil_subsite_id"] = all_matched["soil_subsite_id"]
+
+        if "soil_depth_range" in all_matched:
+            query_filters["soil_depth_range"] = all_matched["soil_depth_range"]
+
+        if "speciesname" in all_matched:
+            user_species_values = all_matched.get("speciesname", [])
+            if not isinstance(user_species_values, (list, tuple)):
+                user_species_values = [user_species_values]
+
+            species_df = self.discover_speciesname()
+            if "speciesname" in species_df.columns:
+                available_species = [
+                    str(v).strip()
+                    for v in species_df["speciesname"].dropna().tolist()
+                    if str(v).strip()
+                ]
+            else:
+                available_species = []
+
+            if not available_species:
+                raise EcoPlotsError(
+                    "Unable to validate 'speciesname': discovery returned no species values "
+                    "for the current filters."
+                )
+
+            matched_species = []
+            unmatched_species = []
+
+            for raw_value in user_species_values:
+                candidate = str(raw_value).strip()
+                if not candidate:
+                    unmatched_species.append(raw_value)
+                    continue
+
+                # First pass: case-insensitive exact match.
+                exact_match = next(
+                    (name for name in available_species if name.casefold() == candidate.casefold()),
+                    None,
+                )
+                if exact_match is not None:
+                    matched_species.append(exact_match)
+                    continue
+
+                # Fuzzy fallback to tolerate minor spelling/casing/missing tokens.
+                fuzzy = process.extractOne(candidate, available_species, scorer=fuzz.WRatio)
+                if fuzzy is None:
+                    unmatched_species.append(raw_value)
+                    continue
+
+                best_name, score, _ = fuzzy
+                if score >= 80:
+                    if best_name.casefold() != candidate.casefold():
+                        self._display_warning(
+                            f"Value '{candidate}' for facet 'speciesname' corrected to "
+                            f"'{best_name}'."
+                        )
+                    matched_species.append(best_name)
+                else:
+                    unmatched_species.append(raw_value)
+
+            if unmatched_species:
+                all_unmatched.setdefault("speciesname", [])
+                all_unmatched["speciesname"].extend(unmatched_species)
+            else:
+                # Deduplicate while preserving order.
+                deduped_species = []
+                seen_species = set()
+                for item in matched_species:
+                    if item not in seen_species:
+                        seen_species.add(item)
+                        deduped_species.append(item)
+                all_matched["speciesname"] = deduped_species
+                query_filters["speciesname"] = deduped_species
+
         to_validate = {
-            k: v for k, v in self._filters.items() if k not in {"spatial", "has_image"}
+            k: v
+            for k, v in self._filters.items()
+            if k
+            not in {
+                "spatial",
+                "has_images",
+                "soil_subsite_id",
+                "soil_depth_range",
+                "speciesname",
+            }
         }
 
         with ThreadPoolExecutor() as executor:
@@ -1676,11 +1856,12 @@ class EcoPlotsBase:
             }
         }
 
+
         if self._mode == "samples":
             payload["context"] = "samples"
-            has_image = payload["query"].pop("has_image", None)
-            if has_image is True:
-                payload["has_image"] = True
+            has_images = payload["query"].pop("has_images", None)
+            if has_images is True:
+                payload["has_images"] = True
        
         resp = requests.post(
             f"{self._base_url}/api/v1.0/ui/map/clusters",
@@ -1690,3 +1871,39 @@ class EcoPlotsBase:
 
         resp.raise_for_status()
         return orjson.loads(resp.content)
+
+    def _ensure_required_material_sample_types(self, required_labels: list[str], context: str) -> None:
+        """Ensure at least one required material sample type is selected.
+
+        Args:
+            required_labels: Human-readable material sample type labels where at
+                least one must be present in current ``material_sample_type``.
+            context: Short workflow name used in error messages.
+
+        Raises:
+            EcoPlotsError: If none of the required sample types are selected.
+        """
+        label_to_uri = {label: uri for uri, label in MATERIAL_SAMPLE_TYPE_MAP.items()}
+        selected = self._query_filters.get("material_sample_type", [])
+        if isinstance(selected, str):
+            selected_uris = {selected}
+        else:
+            selected_uris = set(selected)
+
+        required_uris = {
+            label_to_uri[label]
+            for label in required_labels
+            if label in label_to_uri
+        }
+
+        has_any_required = bool(selected_uris.intersection(required_uris))
+
+        if not has_any_required:
+            selected_labels = [
+                MATERIAL_SAMPLE_TYPE_MAP.get(uri, uri) for uri in sorted(selected_uris)
+            ]
+            selected_display = ", ".join(selected_labels) if selected_labels else "none"
+            raise EcoPlotsError(
+                f"{context} requires material_sample_type to include at least one of: "
+                f"{', '.join(required_labels)}. Currently selected: {selected_display}."
+            )
