@@ -45,9 +45,12 @@ SAMPLE_QUERY_FACETS = [
     "region",
     "dataset",
     "site_id",
+    "soil_subsite_id",
+    "soil_depth_range",
+    "speciesname",
     "material_sample_type",
     "used_procedure",
-    "has_image",
+    "has_images",
     "spatial",
 ]
 
