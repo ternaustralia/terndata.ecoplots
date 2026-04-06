@@ -120,7 +120,10 @@ class EcoPlots(EcoPlotsBase):
         if dformat == "json":
             return data
 
-        pairs = {"observations": data["total_doc"], **data["unique_count"]}
+        if self._mode == "observations":
+            pairs = {"observations": data["total_doc"], **data["unique_count"]}
+        elif self._mode == "samples":
+            pairs = {**data["unique_count"]}
 
         return pd.Series(pairs, name="count").rename_axis("metric").reset_index()
 
@@ -375,39 +378,6 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover_samples("material_sample_type")
         return pd.DataFrame(data)
 
-    def _ensure_required_material_sample_types(self, required_labels: list[str], context: str) -> None:
-        """Ensure required material sample types are selected for a workflow.
-
-        Args:
-            required_labels: Human-readable material sample type labels that must
-                be present in the current ``material_sample_type`` selection.
-            context: Short workflow name used in error messages.
-
-        Raises:
-            EcoPlotsError: If one or more required sample types are not selected.
-        """
-        label_to_uri = {label: uri for uri, label in MATERIAL_SAMPLE_TYPE_MAP.items()}
-        selected = self._query_filters.get("material_sample_type", [])
-        if isinstance(selected, str):
-            selected_uris = {selected}
-        else:
-            selected_uris = set(selected)
-
-        missing = []
-        for label in required_labels:
-            uri = label_to_uri.get(label)
-            if uri is None or uri not in selected_uris:
-                missing.append(label)
-
-        if missing:
-            selected_labels = [
-                MATERIAL_SAMPLE_TYPE_MAP.get(uri, uri) for uri in sorted(selected_uris)
-            ]
-            selected_display = ", ".join(selected_labels) if selected_labels else "none"
-            raise EcoPlotsError(
-                f"{context} requires material_sample_type to include: "
-                f"{', '.join(required_labels)}. Currently selected: {selected_display}."
-            )
 
     def get_sample_igsn(self) -> pd.DataFrame:
         """Get sample names and derived IGSN values.
@@ -484,7 +454,7 @@ class EcoPlots(EcoPlotsBase):
 
         Raises:
             EcoPlotsError: If called in a mode other than "samples".
-            EcoPlotsError: If required material sample types are not selected.
+            EcoPlotsError: If none of the required material sample types are selected.
         """
         if self._mode != "samples":
             raise EcoPlotsError("Soil depth range is only available in 'samples' mode.")
@@ -506,7 +476,7 @@ class EcoPlots(EcoPlotsBase):
 
         Raises:
             EcoPlotsError: If called in a mode other than "samples".
-            EcoPlotsError: If required material sample types are not selected.
+            EcoPlotsError: If none of the required material sample types are selected.
         """
         if self._mode != "samples":
             raise EcoPlotsError("Soil pit distribution is only available in 'samples' mode.")
@@ -530,7 +500,7 @@ class EcoPlots(EcoPlotsBase):
 
         Raises:
             EcoPlotsError: If called in a mode other than "samples".
-            EcoPlotsError: If required material sample types are not selected.
+            EcoPlotsError: If none of the required material sample types are selected.
         """
         if self._mode != "samples":
             raise EcoPlotsError("Species distribution is only available in 'samples' mode.")
