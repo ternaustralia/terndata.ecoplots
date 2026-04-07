@@ -499,6 +499,17 @@ class EcoPlotsBase:
         Args:
             filters: Mapping like ``{"site_id": [...], "dataset": [...]}``.
             **kwargs: Alternative way to pass filters, e.g. ``site_id="ABC"``.
+                Special keyword filters (handled separately from facet resolution):
+
+                - ``spatial``: WKT string or GeoJSON geometry ``dict`` to
+                  spatially restrict results to a custom region.
+                - ``has_images`` (``bool``, *samples* mode only): Limit to
+                  samples that have attached images.
+                - ``soil_subsite_id`` (``int`` or ``list[int]``, *samples* mode
+                  only): Restrict to specific soil sub-site identifiers.
+                - ``soil_depth_range`` (``[min, max]`` or
+                  ``{"min": x, "max": y}``, *samples* mode only): Filter
+                  samples by soil depth in metres.
 
         Raises:
             EcoPlotsError: Unknown filter keys.
@@ -671,6 +682,8 @@ class EcoPlotsBase:
 
         Raises:
             EcoPlotsError: Unknown filter keys (not in ``QUERY_FACETS``).
+            EcoPlotsError: If ``dataset`` is targeted while in ``samples`` mode
+                (the ``TERN Ecosystem Surveillance`` dataset is protected).
             KeyError: Facet not present in current filters.
             EcoPlotsError: Specific values requested but not found for that facet.
 
@@ -753,6 +766,10 @@ class EcoPlotsBase:
 
         Returns:
             self (chainable)
+
+        Notes:
+            In ``samples`` mode the ``TERN Ecosystem Surveillance`` dataset
+            filter is preserved; only user-added filters are cleared.
         """
         # Preserve persistent dataset when in samples mode
         if self._mode == "samples":
@@ -773,8 +790,9 @@ class EcoPlotsBase:
             EcoPlotsError: If an invalid facet name is provided.
 
         Returns:
-            The current filter values for the specified facet as list.
-            Returns a JSON string of all filters if facet is None.
+            A list of values for the specified facet, or ``None`` if the facet
+            is not currently applied. If *facet* is ``None``, returns a ``dict``
+            mapping each applied facet to its list of values.
         """
         if facet:
             facet_val = resolve_facet(facet, QUERY_FACETS)
@@ -796,8 +814,9 @@ class EcoPlotsBase:
             EcoPlotsError: If an invalid facet name is provided.
 
         Returns:
-            A dictionary of the current query filters.
-            Returns a JSON string of all query filters if facet is None.
+            A list of resolved API values for the specified facet, or ``None``
+            if the facet is not currently applied. If *facet* is ``None``,
+            returns a ``dict`` of all resolved query filters.
         """
         if facet:
             facet_val = resolve_facet(facet, QUERY_FACETS)
@@ -1630,7 +1649,8 @@ class EcoPlotsBase:
             path: Path to a `.ecoproj` file previously created by :meth:`save`.
 
         Returns:
-            A new instance of `EcoPlots` with `filters` and `query_filters` restored.
+            A new instance of the calling class with ``filters`` and
+            ``query_filters`` restored from the file.
 
         Raises:
             FileNotFoundError: If the file does not exist.

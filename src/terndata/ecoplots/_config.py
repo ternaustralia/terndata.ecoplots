@@ -1,3 +1,9 @@
+"""Configuration constants for the EcoPlots library.
+
+Defines the API base URL, cache settings, magic bytes for ``.ecoproj`` binary
+project files, and the facet lists that control which filter keys are valid in
+each operational mode (``"observations"`` / ``"samples"``).
+"""
 import os
 import tempfile
 

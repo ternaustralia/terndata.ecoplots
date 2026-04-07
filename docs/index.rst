@@ -79,5 +79,5 @@ Next steps
    :hidden:
    :maxdepth: 1
 
-  internals
-  changelog
+   internals
+   changelog

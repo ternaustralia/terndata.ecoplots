@@ -94,9 +94,10 @@ class EcoPlots(EcoPlotsBase):
         query_filters: Optional[dict] = None,
         mode: Optional[str] = "observations"
     ):
-        """Initialise the EcoPlots client with filters.
+        """Initialise the EcoPlots client.
 
-        If no base filter is provided, it defaults to the one specified in the config.
+        All parameters default to empty/``None``; the typical workflow is to
+        create the client first and then apply filters via :meth:`select`.
 
         Args:
             filterset: Initial filter set. Defaults to None.
@@ -110,11 +111,14 @@ class EcoPlots(EcoPlotsBase):
 
         Args:
             dformat: The desired format for the summary.
-                If "json", returns a JSON string. Defaults to None,
-                which returns a Pandas DataFrame.
+                If ``"json"``, returns the raw summary ``dict`` from the API.
+                Defaults to ``None``, which returns a :class:`pandas.DataFrame`.
 
         Returns:
-            A DataFrame containing the summary of the EcoPlots data.
+            When *dformat* is ``"json"``, returns the raw summary ``dict``
+            from the API. Otherwise, returns a :class:`pandas.DataFrame`
+            with columns ``metric`` and ``count`` summarising the current
+            selection (e.g. total observations, unique sites, datasets).
         """
         data = self.summarise_data()
         if dformat == "json":
@@ -698,9 +702,10 @@ class AsyncEcoPlots(EcoPlots):
         query_filters: Optional[dict] = None,
         mode: Optional[str] = "observations"
     ):
-        """Initialize the AsyncEcoPlots client with filters.
+        """Initialise the AsyncEcoPlots client.
 
-        If no base filter is provided, it defaults to the one specified in the config.
+        All parameters default to empty/``None``; the typical workflow is to
+        create the client first and then apply filters via :meth:`select`.
 
         Args:
             filterset: Initial filter set. Defaults to None.
