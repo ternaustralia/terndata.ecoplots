@@ -3,13 +3,19 @@ Change Log
 
 Changes over time for the EcoPlots Python library.
 
+Beta v7
+-------
+
+- Updated Documentations.
+- Minor bug fixes and imprrovements to the samples workflow.
+- Added *Samples Workflow* demo notebook.
+
 Beta v6
 -------
 
 - Introduced the **has_image** field in sample discovery responses to indicate the presence of associated images.
 - Added the IGSN based sample discovery path to the samples-mode discovery workflow, enabling retrieval of sample metadata based on IGSN values.
 - Added the **samples image viewer** and **samples IGSN viewer**.
-
 
 Beta v5
 -------

@@ -171,5 +171,4 @@ See the :doc:`EcoPlots <ecoplots_class>` and :doc:`AsyncEcoPlots <async_ecoplots
     :members:
     :undoc-members:
     :show-inheritance:
-
-
+    :exclude-members: EcoPlotsError
