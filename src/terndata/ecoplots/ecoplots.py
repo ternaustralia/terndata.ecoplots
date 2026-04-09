@@ -441,10 +441,19 @@ class EcoPlots(EcoPlotsBase):
 
         Raises:
             EcoPlotsError: If called in a mode other than ``samples``.
+            EcoPlotsError: If no material sample type is selected.
         """
         if self._mode != "samples":
             raise EcoPlotsError("IGSN viewer is only available in 'samples' mode.")
 
+        self._ensure_required_material_sample_types(
+            list(MATERIAL_SAMPLE_TYPE_MAP.values()),
+            "IGSN viewer",
+        )
+
+        # FIXME: aggregation requests sent to Elasticsearch with an empty query
+        # result in a 404 response. Which is unlike any other discovery facet.
+        # The root cause is unknown and needs to be investigated.
         igsn_df = self.get_sample_igsn()
         return igsn_viewer(igsn_df, igsn=igsn)
     

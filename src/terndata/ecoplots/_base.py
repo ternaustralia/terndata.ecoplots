@@ -503,7 +503,7 @@ class EcoPlotsBase:
 
                 - ``spatial``: WKT string or GeoJSON geometry ``dict`` to
                   spatially restrict results to a custom region.
-                - ``has_images`` (``bool``, *samples* mode only): Limit to
+                - ``has_image`` (``bool``, *samples* mode only): Limit to
                   samples that have attached images.
                 - ``soil_subsite_id`` (``int`` or ``list[int]``, *samples* mode
                   only): Restrict to specific soil sub-site identifiers.
@@ -570,17 +570,17 @@ class EcoPlotsBase:
         for k, v in input_filters.items():
             if v is None:
                 continue
-            if k == "has_images":
+            if k == "has_image":
                 if self._mode != "samples":
-                    raise EcoPlotsError("'has_images' filter is only available in 'samples' mode.")
+                    raise EcoPlotsError("'has_image' filter is only available in 'samples' mode.")
                 if isinstance(v, (list, tuple)):
                     if len(v) != 1:
-                        raise EcoPlotsError("'has_images' accepts a single boolean value.")
+                        raise EcoPlotsError("'has_image' accepts a single boolean value.")
                     v = v[0]
                 if not isinstance(v, bool):
-                    raise EcoPlotsError("'has_images' must be a boolean (True/False).")
-                self._filters["has_images"] = v
-                self._query_filters["has_images"] = v
+                    raise EcoPlotsError("'has_image' must be a boolean (True/False).")
+                self._filters["has_image"] = v
+                self._query_filters["has_image"] = v
                 continue
             if k == "spatial":
                 _validate_spatial_input(v)  # validate spatial filter
@@ -932,7 +932,7 @@ class EcoPlotsBase:
             else:
                 raise EcoPlotsError(f"Could not resolve region_type: {region_type}")
 
-        payload = {"query": query, "has_images": self._query_filters.get("has_images", False)}
+        payload = {"query": query, "has_image": self._query_filters.get("has_image", False)}
 
         params = []
         if discovery_facet == "sample_name":
@@ -1301,10 +1301,10 @@ class EcoPlotsBase:
             "context": "samples"
         }
 
-        has_images = bool(payload["query"].pop("has_images", False))
+        has_image = bool(payload["query"].pop("has_image", False))
 
-        if has_images:
-            payload["has_images"] = True
+        if has_image:
+            payload["has_image"] = True
 
         timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
 
@@ -1318,9 +1318,9 @@ class EcoPlotsBase:
                     resp.raise_for_status()
                     data = await resp.json()
             except aiohttp.ClientResponseError as exc:
-                if has_images and exc.status >= 500:
+                if has_image and exc.status >= 500:
                     self._display_warning(
-                        "Server rejected 'has_images=true'. Retrying without has_images "
+                        "Server rejected 'has_image=true'. Retrying without has_image "
                         "and filtering image rows client-side."
                     )
                     fallback_payload = {
@@ -1340,7 +1340,7 @@ class EcoPlotsBase:
         # Extract hits from response
         hits = data.get("hits", {}).get("hits", [])
 
-        if has_images:
+        if has_image:
             def _has_sample_images(value):
                 if not isinstance(value, list):
                     return False
@@ -1574,8 +1574,8 @@ class EcoPlotsBase:
 
         if self._mode == "samples":
             payload["context"] = "samples"
-            if "has_images" in payload["query"]:
-                payload["has_images"] = payload["query"].pop("has_images")
+            if "has_image" in payload["query"]:
+                payload["has_image"] = payload["query"].pop("has_image")
 
         resp = requests.post(f"{self._base_url}/api/v1.0/data/summary", json=payload, timeout=30)
         resp.raise_for_status()
@@ -1786,7 +1786,7 @@ class EcoPlotsBase:
             if k
             not in {
                 "spatial",
-                "has_images",
+                "has_image",
                 "soil_subsite_id",
                 "soil_depth_range",
                 "speciesname",
@@ -1879,9 +1879,9 @@ class EcoPlotsBase:
 
         if self._mode == "samples":
             payload["context"] = "samples"
-            has_images = payload["query"].pop("has_images", None)
-            if has_images is True:
-                payload["has_images"] = True
+            has_image = payload["query"].pop("has_image", None)
+            if has_image is True:
+                payload["has_image"] = True
        
         resp = requests.post(
             f"{self._base_url}/api/v1.0/ui/map/clusters",

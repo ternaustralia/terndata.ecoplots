@@ -56,7 +56,7 @@ SAMPLE_QUERY_FACETS = [
     "speciesname",
     "material_sample_type",
     "used_procedure",
-    "has_images",
+    "has_image",
     "spatial",
 ]
 
