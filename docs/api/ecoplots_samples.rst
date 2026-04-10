@@ -29,6 +29,11 @@ such as IGSN identifiers and sample images.
    applied automatically. You cannot remove it; it is required for all sample
    queries.
 
+.. note::
+
+   A runnable walkthrough of all samples-mode features is available in the
+   `Samples Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo_samples.ipynb>`_.
+
 .. currentmodule:: terndata.ecoplots.ecoplots
 
 ----

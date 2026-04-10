@@ -107,9 +107,12 @@ gdf = await ec.get_data()        # non-blocking fetch
 
 ---
 
-## Demo
+## Demo Notebooks
 
-For example usage, see the [demo notebook](examples/demo.ipynb).
+| Mode | Notebook |
+|---|---|
+| Observations | [examples/demo.ipynb](examples/demo.ipynb) |
+| Samples | [examples/demo_samples.ipynb](examples/demo_samples.ipynb) |
 
 ---
 

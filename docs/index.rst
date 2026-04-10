@@ -116,7 +116,8 @@ Next steps
 - :doc:`Package overview <api/overview>` — constructor parameters, client comparison
 - :doc:`EcoPlots Client <api/ecoplots_class>` — full API reference
 - :doc:`Async EcoPlots client <api/async_ecoplots_class>`
-- `Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo.ipynb>`_
+- `Observations Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo.ipynb>`_
+- `Samples Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo_samples.ipynb>`_
 
 .. toctree::
    :hidden:

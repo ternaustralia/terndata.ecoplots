@@ -22,6 +22,11 @@ for analysis.
    :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` (asynchronous).
    For ``AsyncEcoPlots``, use ``df = await ec.get_data()`` in the final step.
 
+.. note::
+
+   A runnable walkthrough of all observations-mode features is available in the
+   `Observations Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo.ipynb>`_.
+
 .. currentmodule:: terndata.ecoplots.ecoplots
 
 ----
