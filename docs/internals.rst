@@ -1,35 +1,40 @@
 Internal Modules
 ================
 
+These modules contain the internal implementation of the EcoPlots library.
+They are not part of the public API but are documented here for contributors
+and advanced users.
+
 .. automodule:: terndata.ecoplots._base
    :members:
-   :private-members:
-   :special-members: __eq__, __bool__, __str__, __repr__, __len__, __contains__, __getitem__, __setitem__, __delitem__, __copy__, __deepcopy__
-   :exclude-members: Path, Iterable, TypeVar, ThreadPoolExecutor, as_completed, datetime, timezone, Coroutine
+   :show-inheritance:
+   :exclude-members: Cache, EcoPlotsError, ThreadPoolExecutor, as_completed, SelfType, Path, TypeVar
+
+.. automodule:: terndata.ecoplots._exceptions
+   :members:
+   :show-inheritance:
 
 .. automodule:: terndata.ecoplots._utils
    :members:
-   :private-members:
-   :exclude-members: Path, Iterable, TypeVar, ThreadPoolExecutor, as_completed, datetime, timezone, Coroutine
+   :show-inheritance:
+   :exclude-members: EcoPlotsError, Path, TypeVar
 
 .. automodule:: terndata.ecoplots._config
    :members:
-   :private-members:
-   :exclude-members: Path, Iterable, TypeVar, ThreadPoolExecutor, as_completed, datetime, timezone, Coroutine
+   :show-inheritance:
 
 .. automodule:: terndata.ecoplots._nlp_utils
    :members:
-   :private-members:
-   :exclude-members: Path, Iterable, TypeVar, ThreadPoolExecutor, as_completed, datetime, timezone, Coroutine
+   :show-inheritance:
+   :exclude-members: EcoPlotsError
 
 .. automodule:: terndata.ecoplots._flatten_response
    :members:
-   :private-members:
-   :exclude-members: Path, Iterable, TypeVar, ThreadPoolExecutor, as_completed, datetime, timezone, Coroutine
+   :show-inheritance:
 
 .. automodule:: terndata.ecoplots._gui.spatial_selector
    :members:
-   :private-members:
-   :exclude-members: Path, Iterable, TypeVar, ThreadPoolExecutor, as_completed, datetime, timezone, Coroutine
+   :show-inheritance:
+   :exclude-members: Map, DrawControl, WidgetControl, basemap_to_tiles, basemaps, Heatmap, CircleMarker, Marker, Popup, LayerGroup, HTML, Button, Checkbox, HBox, Layout, Output, VBox, ToggleButton
 
 

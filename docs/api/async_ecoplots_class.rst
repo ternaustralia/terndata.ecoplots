@@ -1,6 +1,66 @@
 AsyncEcoPlots
 =============
 
+Overview
+--------
+
+``AsyncEcoPlots`` is the asynchronous client. It is useful when you already run
+async code (for example in services/apps) and want non-blocking data download.
+
+In practice, most methods are used the same way as the synchronous client.
+The key difference is that you use ``await`` for ``get_data()``.
+
+Constructor Parameters
+----------------------
+
+Signature:
+
+.. code-block:: python
+
+   AsyncEcoPlots(filterset=None, query_filters=None, mode="observations")
+
+What each parameter means:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 16 30 36
+
+   * - Parameter
+     - Type
+     - What it sets
+     - Should you set it manually?
+   * - ``filterset``
+     - ``dict`` or ``None``
+     - Starting human-readable filters.
+     - Usually no. Prefer using ``select()`` after creation.
+   * - ``query_filters``
+     - ``dict`` or ``None``
+     - Internal API-ready filter values.
+     - No. Keep this internal.
+   * - ``mode``
+     - ``str``
+     - ``"observations"`` (default) or ``"samples"``.
+     - Yes, only when you intentionally need samples workflows.
+
+Internal Variables: Do Not Edit Manually
+----------------------------------------
+
+Avoid directly changing these internal attributes:
+
+- ``_filters``
+- ``_query_filters``
+- ``_mode``
+- ``_base_url``
+
+Use public methods instead (for example ``select()``, ``remove()``,
+``summary()``, ``preview()`` and ``get_data()``).
+
+Async Usage Note
+----------------
+
+- ``EcoPlots``: ``df = ec.get_data()``
+- ``AsyncEcoPlots``: ``df = await ec.get_data()``
+
 .. autoclass:: terndata.ecoplots.ecoplots.AsyncEcoPlots
    :members:
    :undoc-members:

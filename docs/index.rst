@@ -8,12 +8,14 @@
      </div>
 
      <p class="eco-hero__tagline">
-       Discover, filter, preview, and retrieve data from the TERN EcoPlots Portal.
+       Discover, filter, preview, and retrieve ecological observations and physical
+       samples from the TERN EcoPlots Portal.
      </p>
 
      <p class="eco-hero__cta">
-       <a class="eco-btn eco-btn--primary" href="api/ecoplots_class.html">EcoPlots Client</a>
-       <a class="eco-btn eco-btn--outline" href="api/overview.html">Overview</a>
+       <a class="eco-btn eco-btn--primary" href="api/ecoplots_observations.html">Observations Workflow</a>
+       <a class="eco-btn eco-btn--primary" href="api/ecoplots_samples.html">Samples Workflow</a>
+       <a class="eco-btn eco-btn--outline" href="api/overview.html">API Overview</a>
      </p>
 
      <div class="eco-badges">
@@ -34,39 +36,88 @@
 
 About EcoPlots
 ==============
-TERN EcoPlots is a platform designed for searching, discovering, and accessing ecological observations—both from systematic site-based surveys and opportunistic surveys—as well as specimen samples collected during field surveys from various data sources. With TERN EcoPlots, users can search for observation data and specimen samples from systematic surveys across Australia. The platform allows users to integrate data from multiple sources and access it as a comprehensive, ready-to-use data package. Additionally, users can search for specimen samples and request access to these samples for further research.
 
-TERN EcoPlots is developed based on a semantic data integration approach. Datasets are generally received from custodians in various forms, including PostgreSQL databases and CSV file formats. In the data ingestion process, each source dataset is mapped to a `TERN Plot ontology <https://linkeddata.tern.org.au/information-models/tern-ontology>`_ including the identification and mapping of domain feature types, parameters, and categorical values to controlled vocabularies, as well as the performance of data validation routines and the resolution of taxonomic names. All data are organised in Resource Description Framework (RDF) and stored in a triple store.
+`TERN EcoPlots <https://ecoplots.tern.org.au>`_ is a platform
+for searching, discovering, and accessing Australian ecological data — from systematic
+site-based surveys and opportunistic observations, to physical specimen samples
+collected during field surveys.
 
-See also: `EcoPlots Portal <https://ecoplots.tern.org.au>`_.
+The platform integrates data from multiple custodians into a single, analysis-ready
+package underpinned by a semantic data model. Source datasets are mapped to the
+`TERN Plot Ontology <https://linkeddata.tern.org.au/information-models/tern-ontology>`_,
+where feature types, parameters, and categorical values are linked to controlled
+vocabularies and stored as RDF in a triple store.
 
-EcoPlots Python library
+EcoPlots Python Library
 =======================
-The EcoPlots Python library provides a small, Pythonic client for the EcoPlots REST API, so you can programmatically discover datasets, apply validated filters, preview results, and retrieve analysis-ready data.
+
+The ``terndata.ecoplots`` Python library provides a lightweight, Pythonic client
+for the EcoPlots REST API. It supports two operational modes:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
+
+   * - Mode
+     - What you can access
+   * - **observations**
+     - Ecological observation data — site visits, feature types, measured
+       properties — returned as ``pandas``/``geopandas`` tables.
+   * - **samples**
+     - Physical specimens (soil, plant tissue, plant voucher) with IGSN
+       identifiers, sample images, and associated metadata.
 
 Key capabilities:
 
-- **Discovery & filtering**: human-friendly filters that are validated against the portal’s controlled vocabularies.
-- **Preview first**: inspect results quickly (page-wise) before downloading full datasets.
-- **Spatial selection**: filter using polygons, rectangles, or WKT/GeoJSON.
-- **Tidy outputs**: return formats include ``pandas.DataFrame``, ``geopandas.GeoDataFrame`` (optional), or raw GeoJSON.
-- **Two runtimes**:
-  - :class:`~terndata.ecoplots.ecoplots.EcoPlots` (synchronous) for scripts and notebooks.
-  - :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` (asynchronous) for web backends and concurrent I/O.
-- **Reproducibility**: save and reload selections/projects via ``.ecoproj`` files.
+- Human-friendly, validated filters with fuzzy name resolution
+- Preview results page-by-page before committing to a full download
+- Interactive widgets: spatial selector, IGSN viewer, sample image viewer
+- Two runtimes: :class:`~terndata.ecoplots.ecoplots.EcoPlots` (sync) and
+  :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` (async)
+- Save and reload your filter selection via ``.ecoproj`` project files
 
 Installation
 ============
+
 .. code-block:: bash
 
    pip install terndata.ecoplots
 
+Supported Python: 3.10+
+
+Quick start
+===========
+
+**Observations**
+
+.. code-block:: python
+
+   from terndata.ecoplots import EcoPlots
+
+   ec = EcoPlots()                          # mode="observations" by default
+   ec.select(dataset="TERN Surveillance")
+   gdf = ec.get_data()
+
+**Samples**
+
+.. code-block:: python
+
+   from terndata.ecoplots import EcoPlots
+
+   ec = EcoPlots(mode="samples")
+   ec.select(material_sample_type="Plant Voucher Specimen", has_images=True)
+   df = ec.get_data(dformat="pd")
+
 Next steps
 ==========
-- `Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo.ipynb>`_ - Interactive examples and usage patterns
-- :doc:`Package overview <api/overview>`
-- :doc:`EcoPlots Client <api/ecoplots_class>`
+
+- :doc:`Observations Workflow <api/ecoplots_observations>` — all methods available in observations mode
+- :doc:`Samples Workflow <api/ecoplots_samples>` — all methods available in samples mode
+- :doc:`Package overview <api/overview>` — constructor parameters, client comparison
+- :doc:`EcoPlots Client <api/ecoplots_class>` — full API reference
 - :doc:`Async EcoPlots client <api/async_ecoplots_class>`
+- `Observations Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo.ipynb>`_
+- `Samples Demo Notebook <https://github.com/ternaustralia/terndata.ecoplots/blob/main/examples/demo_samples.ipynb>`_
 
 .. toctree::
    :hidden:
@@ -78,4 +129,7 @@ Next steps
    :hidden:
    :maxdepth: 1
 
+   api/ecoplots_observations
+   api/ecoplots_samples
    internals
+   changelog

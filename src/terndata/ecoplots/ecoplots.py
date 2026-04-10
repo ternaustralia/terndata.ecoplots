@@ -42,9 +42,9 @@ import pandas as pd
 from diskcache import Cache
 
 from ._base import EcoPlotsBase
-from ._config import CACHE_DIR
+from ._config import CACHE_DIR, MATERIAL_SAMPLE_TYPE_MAP
 from ._exceptions import EcoPlotsError
-from ._gui import spatial_selector
+from ._gui import igsn_viewer, sample_image_viewer, spatial_selector
 from ._utils import (
     _align_and_concat,
     _run_sync,
@@ -88,55 +88,83 @@ class EcoPlots(EcoPlotsBase):
         :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots`: Async counterpart with the same surface area.
     """
 
-    def __init__(self, filterset: Optional[dict] = None, query_filters: Optional[dict] = None):
-        """Initialise the EcoPlots client with filters.
+    def __init__(
+        self,
+        filterset: Optional[dict] = None,
+        query_filters: Optional[dict] = None,
+        mode: Optional[str] = "observations"
+    ):
+        """Initialise the EcoPlots client.
 
-        If no base filter is provided, it defaults to the one specified in the config.
+        All parameters default to empty/``None``; the typical workflow is to
+        create the client first and then apply filters via :meth:`select`.
 
         Args:
             filterset: Initial filter set. Defaults to None.
             query_filters: Initial query filters. Defaults to None.
+            mode: The mode of operation. Defaults to "observations".
         """
-        super().__init__(filterset=filterset, query_filters=query_filters)
+        super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
     def summary(self, dformat: Optional[str] = None) -> Union[pd.DataFrame, str]:
         """Summarize the EcoPlots data.
 
         Args:
             dformat: The desired format for the summary.
-                If "json", returns a JSON string. Defaults to None,
-                which returns a Pandas DataFrame.
+                If ``"json"``, returns the raw summary ``dict`` from the API.
+                Defaults to ``None``, which returns a :class:`pandas.DataFrame`.
 
         Returns:
-            A DataFrame containing the summary of the EcoPlots data.
+            When *dformat* is ``"json"``, returns the raw summary ``dict``
+            from the API. Otherwise, returns a :class:`pandas.DataFrame`
+            with columns ``metric`` and ``count`` summarising the current
+            selection (e.g. total observations, unique sites, datasets).
         """
         data = self.summarise_data()
         if dformat == "json":
             return data
 
-        pairs = {"observations": data["total_doc"], **data["unique_count"]}
+        if self._mode == "observations":
+            pairs = {"observations": data["total_doc"], **data["unique_count"]}
+        elif self._mode == "samples":
+            pairs = {**data["unique_count"]}
 
         return pd.Series(pairs, name="count").rename_axis("metric").reset_index()
 
     def preview(self, dformat: Optional[str] = None) -> Union[gpd.GeoDataFrame, dict, str]:
-        """Fetch a small, first-page preview of EcoPlots data.  # noqa: DAR401, D415
+        """Fetch a small preview of EcoPlots data.  # noqa: DAR401, D415
 
-        This method uses the same strategy as `get_data()` but only fetches a small
-        subset (10 records from up to 2 feature types) for quick preview.
+        Mirrors :meth:`get_data` but limits results to 10 records for a quick look.
+
+        In ``observations`` mode, fetches CSV from up to 2 feature types (5 rows each).
+        In ``samples`` mode, calls the samples endpoint and returns the first 10 rows;
+        ``"geojson"``/``"json"`` formats are not supported in this mode.
 
         Args:
             dformat: Output format.
-                - "geojson" or "json": returns a pretty-printed GeoJSON string.
-                - "pandas" (or "pd"): returns a pandas DataFrame.
-                - "geopandas" (or "gpd") (default): returns a GeoDataFrame.
+                - ``"geojson"`` or ``"json"``: returns a GeoJSON dict (observations only).
+                - ``"pandas"`` (or ``"pd"``): returns a :class:`pandas.DataFrame`.
+                - ``"geopandas"`` (or ``"gpd"``) (default): returns a :class:`~geopandas.GeoDataFrame`.
 
         Returns:
             Preview data in the requested format.
 
         Raises:
             EcoPlotsError: If an invalid dformat is provided.
-            RuntimeError: If no feature types found.
+            RuntimeError: If no feature types found (observations mode).
         """
+        if self._mode == "samples":
+            if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
+                raise EcoPlotsError(
+                    "In 'samples' mode, supported dformat values are: "
+                    "'pandas' (or 'pd') and 'geopandas' (or 'gpd')."
+                )
+            samples_gdf = cast(gpd.GeoDataFrame, _run_sync(self.fetch_samples_data()))
+            samples_gdf = samples_gdf.head(10)
+            if dformat in ("pandas", "pd"):
+                return pd.DataFrame(samples_gdf)
+            return samples_gdf
+
         if dformat in ("geojson", "json"):
             geojson_data = _run_sync(self.fetch_data(page_number=1, page_size=10))
             return geojson_data
@@ -197,7 +225,14 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the data sources.
         """
-        data = self.discover("dataset")
+        if self._mode == "observations":
+            data = self.discover("dataset")
+        elif self._mode == "samples":
+            # Hardcoded value for now until 
+            # we have more datasets with samples
+            data = self.discover_samples("dataset")
+        else:
+            raise EcoPlotsError(f"Unsupported mode '{self._mode}' for discovering data sources.")
         return pd.DataFrame(data)
 
     def get_datasources_attributes(self) -> pd.DataFrame:
@@ -226,7 +261,10 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the sites.
         """
-        data = self.discover("site_id")
+        if self._mode == "samples":
+            data = self.discover_samples("site_id")
+        else:
+            data = self.discover("site_id")
         return pd.DataFrame(data)
 
     def get_sites_attributes(self) -> pd.DataFrame:
@@ -275,7 +313,11 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the region types.
         """
-        data = self.discover("region_type")
+        if self._mode == "samples":
+            # For samples, we have a fixed region type of "plot"
+            data = self.discover_samples("region_type")
+        else:
+            data = self.discover("region_type")
         return pd.DataFrame(data)
 
     def get_regions(self, region_type: str) -> pd.DataFrame:
@@ -287,7 +329,11 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             A DataFrame containing the regions for the specified region type.
         """
-        data = self.discover("region", region_type=region_type)
+        if self._mode == "samples":
+            # For samples, we have a fixed region type of "plot", so we ignore the input and use "plot"
+            data = self.discover_samples("region", region_type=region_type)
+        else:
+            data = self.discover("region", region_type=region_type)
         return pd.DataFrame(data)
 
     def get_feature_types(self) -> pd.DataFrame:
@@ -310,14 +356,21 @@ class EcoPlots(EcoPlotsBase):
 
     def get_observation_attributes(self) -> pd.DataFrame:
         """Get the attributes of observations from the applied filters.
+        Available only in "observations" mode.
 
         Returns:
             A DataFrame containing the attributes of the observations.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "observations".
         """
+        if self._mode != "observations":
+            raise EcoPlotsError("Observation attributes are only available in 'observations' mode.")
+
         data = self.discover_attributes("observation")
         uris = data.get("observation_attributes", []) or []
         rows = []
-        with Cache(CACHE_DIR) as cache:  # or self.CACHE_DIR if that's how you store it
+        with Cache(CACHE_DIR) as cache:
             obs_map = cache.get("attributes", {}) or {}
             for uri in uris:
                 val = obs_map.get(uri)
@@ -327,9 +380,170 @@ class EcoPlots(EcoPlotsBase):
                 rows.append(row)
 
         return pd.DataFrame(rows)
+    
+    def get_material_sample_types(self) -> pd.DataFrame:
+        """Get the material sample types from the applied filters.
+        Available only in "samples" mode.
+
+        Returns:
+            A DataFrame containing the material sample types.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Material sample types are only available in 'samples' mode.")
+
+        data = self.discover_samples("material_sample_type")
+        return pd.DataFrame(data)
+
+
+    def get_sample_igsn(self) -> pd.DataFrame:
+        """Get sample names and derived IGSN values.
+
+        Available only in ``samples`` mode. This method discovers
+        ``sample_name`` values using the current query filters, then returns
+        a DataFrame with:
+        - ``sample_name``: sample name with alphabetic characters capitalized.
+        - ``igsn``: derived as ``10.60792/{sample_name_raw}``.
+
+        Returns:
+            A DataFrame with columns ``sample_name`` and ``igsn``.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than ``samples``.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Sample IGSN lookup is only available in 'samples' mode.")
+
+        data = self.discover_samples("sample_name")
+
+        rows = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            sample_name_raw = item.get("key")
+            if not isinstance(sample_name_raw, str) or not sample_name_raw:
+                continue
+
+            sample_name = "".join(
+                ch.upper() if ch.isalpha() else ch for ch in sample_name_raw
+            )
+            rows.append(
+                {
+                    "sample_name": sample_name,
+                    "igsn": f"10.60792/{sample_name_raw}",
+                }
+            )
+
+        return pd.DataFrame(rows, columns=["sample_name", "igsn"])
+
+    def view_sample_igsn(self, igsn: Optional[str] = None):
+        """Open an interactive notebook viewer for sample IGSN DOI pages.
+
+        Available only in ``samples`` mode. This method discovers sample names,
+        builds IGSN values, and displays either:
+        - a dropdown + iframe widget (default), or
+        - a single iframe for a provided IGSN/DOI value.
+
+        Args:
+            igsn: Optional IGSN value or DOI URL. Accepted inputs include
+                ``10.60792/...``, ``doi.org/10.60792/...``, and
+                ``https://doi.org/10.60792/...``.
+
+        Returns:
+            ipywidgets.VBox: Interactive IGSN viewer widget.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than ``samples``.
+            EcoPlotsError: If no material sample type is selected.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("IGSN viewer is only available in 'samples' mode.")
+
+        self._ensure_required_material_sample_types(
+            list(MATERIAL_SAMPLE_TYPE_MAP.values()),
+            "IGSN viewer",
+        )
+
+        # FIXME: aggregation requests sent to Elasticsearch with an empty query
+        # result in a 404 response. Which is unlike any other discovery facet.
+        # The root cause is unknown and needs to be investigated.
+        igsn_df = self.get_sample_igsn()
+        return igsn_viewer(igsn_df, igsn=igsn)
+    
+    def get_soil_depth_range(self) -> gpd.GeoDataFrame:
+        """Get the soil depth range for the current filters.
+
+        Available only in "samples" mode.
+
+        Returns:
+            A GeoDataFrame containing aggregated soil depth range values.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+            EcoPlotsError: If none of the required material sample types are selected.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Soil depth range is only available in 'samples' mode.")
+
+        self._ensure_required_material_sample_types(
+            ["Soil Subsite Sample", "Soil Pit Sample"],
+            "Soil depth range",
+        )
+
+        return cast(gpd.GeoDataFrame, self.discover_soil_depth_range())
+
+    def get_soilpit(self) -> pd.DataFrame:
+        """Get soil pit distribution for the current filters.
+
+        Available only in "samples" mode.
+
+        Returns:
+            A DataFrame with two columns: ``soilpit`` and ``counts``.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+            EcoPlotsError: If none of the required material sample types are selected.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Soil pit distribution is only available in 'samples' mode.")
+
+        self._ensure_required_material_sample_types(
+            ["Soil Metagenomic Sample", "Soil Subsite Sample"],
+            "Soil pit distribution",
+        )
+
+        return cast(pd.DataFrame, self.discover_soilpit())
+
+    def get_speciesname(self) -> pd.DataFrame:
+        """Get species name distribution for the current filters.
+
+        Available only in "samples" mode.
+
+        This method preserves all current query filters, including ``has_image``.
+
+        Returns:
+            A DataFrame with two columns: ``speciesname`` and ``count``.
+
+        Raises:
+            EcoPlotsError: If called in a mode other than "samples".
+            EcoPlotsError: If none of the required material sample types are selected.
+        """
+        if self._mode != "samples":
+            raise EcoPlotsError("Species distribution is only available in 'samples' mode.")
+
+        self._ensure_required_material_sample_types(
+            ["Plant Tissue Sample", "Plant Voucher Specimen"],
+            "Species distribution",
+        )
+
+        return cast(pd.DataFrame, self.discover_species())
 
     def get_data(
-        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
+        self,
+        allow_full_download: Optional[bool] = False,
+        dformat: Optional[str] = "gpd",
     ) -> gpd.GeoDataFrame:
         """Retrieve EcoPlots data based on the current filters.
 
@@ -341,6 +555,12 @@ class EcoPlots(EcoPlotsBase):
                 - "pandas" (or 'pd'): returns a pandas DataFrame.
                 - "geopandas" (or 'gpd') (default): returns a GeoDataFrame.
 
+                In "samples" mode, only "pandas"/"pd" and "geopandas"/"gpd"
+                are supported (no "geojson"/"json").
+
+                In "samples" mode, exactly one ``material_sample_type`` must be
+                selected at a time.
+
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
             EcoPlotsError: If an invalid dformat is provided.
@@ -348,6 +568,18 @@ class EcoPlots(EcoPlotsBase):
         Returns:
             Data in the requested format.
         """
+        if self._mode == "samples":
+            if dformat not in ("pandas", "geopandas", "pd", "gpd"):
+                raise EcoPlotsError(
+                    "In 'samples' mode, supported dformat values are: "
+                    "'pandas' (or 'pd') and 'geopandas' (or 'gpd')."
+                )
+
+            samples_gdf = cast(gpd.GeoDataFrame, _run_sync(self.fetch_samples_data()))
+            if dformat in ("pandas", "pd"):
+                return pd.DataFrame(samples_gdf)
+            return samples_gdf
+
         if not self._query_filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
@@ -404,6 +636,64 @@ class EcoPlots(EcoPlotsBase):
         """
         return spatial_selector(self, **kwargs)
 
+    def view_sample_images(
+        self,
+        data: Optional[pd.DataFrame] = None,
+        image_column: str = "sample_images",
+        sample_id_column: str = "sample_id",
+        sample_name_column: str = "sample_name",
+        scientific_name_column: str = "scientific_name",
+    ):
+        """Open an interactive notebook image browser for sample images.
+
+        Args:
+            data: Optional DataFrame to browse. If omitted, data is fetched in
+                samples mode using current filters.
+            image_column: Name of image column in dataframe.
+            sample_id_column: Name of sample identifier column in dataframe.
+            sample_name_column: Name of sample name column in dataframe.
+            scientific_name_column: Name of scientific name column in dataframe.
+
+        Returns:
+            ipywidgets.VBox: Interactive viewer widget.
+        """
+        if data is None:
+            if self._mode != "samples":
+                raise EcoPlotsError("Sample image viewer is only available in 'samples' mode.")
+
+            has_image_selected = bool(self._query_filters.get("has_image", False))
+            if not has_image_selected:
+                raise EcoPlotsError(
+                    "To inspect images, set has_image via select(), for example: "
+                    "select(has_image=True)."
+                )
+
+            plant_voucher_uri = (
+                "http://linked.data.gov.au/def/tern-cv/18317af1-7c83-468d-883e-ba791500c6e3"
+            )
+            selected_mst = self._query_filters.get("material_sample_type", [])
+            if plant_voucher_uri not in selected_mst:
+                raise EcoPlotsError(
+                    "Image viewer currently requires material_sample_type to be "
+                    "'Plant Voucher Specimen'. Please select it before viewing images."
+                )
+
+            fetched = self.get_data(dformat="pd")
+            if asyncio.iscoroutine(fetched):
+                fetched = _run_sync(fetched)
+            data = cast(pd.DataFrame, fetched)
+
+        if not isinstance(data, pd.DataFrame):
+            data = pd.DataFrame(data)
+
+        return sample_image_viewer(
+            data,
+            image_column=image_column,
+            sample_id_column=sample_id_column,
+            sample_name_column=sample_name_column,
+            scientific_name_column=scientific_name_column,
+        )
+
 
 class AsyncEcoPlots(EcoPlots):
     """High-level **async** client for the EcoPlots REST API.
@@ -430,19 +720,28 @@ class AsyncEcoPlots(EcoPlots):
           are set unless `allow_full_download=True`.
     """
 
-    def __init__(self, filterset: Optional[dict] = None, query_filters: Optional[dict] = None):
-        """Initialize the AsyncEcoPlots client with filters.
+    def __init__(
+        self,
+        filterset: Optional[dict] = None,
+        query_filters: Optional[dict] = None,
+        mode: Optional[str] = "observations"
+    ):
+        """Initialise the AsyncEcoPlots client.
 
-        If no base filter is provided, it defaults to the one specified in the config.
+        All parameters default to empty/``None``; the typical workflow is to
+        create the client first and then apply filters via :meth:`select`.
 
         Args:
             filterset: Initial filter set. Defaults to None.
             query_filters: Initial query filters. Defaults to None.
+            mode: The mode of operation. Defaults to "observations".
         """
-        super().__init__(filterset=filterset, query_filters=query_filters)
+        super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
     async def get_data(
-        self, allow_full_download: Optional[bool] = False, dformat: Optional[str] = "gpd"
+        self,
+        allow_full_download: Optional[bool] = False,
+        dformat: Optional[str] = "gpd",
     ) -> gpd.GeoDataFrame:  # noqa: DAR401
         """Retrieve EcoPlots data asynchronously based on the current filters.
 
@@ -454,6 +753,12 @@ class AsyncEcoPlots(EcoPlots):
                 - "pandas" (or "pd"): returns a pandas DataFrame.
                 - "geopandas" (or "gpd") (default): returns a GeoDataFrame.
 
+                In "samples" mode, only "pandas"/"pd" and "geopandas"/"gpd"
+                are supported (no "geojson"/"json").
+
+                In "samples" mode, exactly one ``material_sample_type`` must be
+                selected at a time.
+
         Raises:
             RuntimeError: If no filters are set and allow_full_download is False.
             EcoPlotsError: If an invalid dformat is provided.
@@ -462,6 +767,18 @@ class AsyncEcoPlots(EcoPlots):
         Returns:
             Data in the requested format.
         """
+        if self._mode == "samples":
+            if dformat not in ("pandas", "geopandas", "pd", "gpd"):
+                raise EcoPlotsError(
+                    "In 'samples' mode, supported dformat values are: "
+                    "'pandas' (or 'pd') and 'geopandas' (or 'gpd')."
+                )
+
+            samples_gdf = cast(gpd.GeoDataFrame, await self.fetch_samples_data())
+            if dformat in ("pandas", "pd"):
+                return pd.DataFrame(samples_gdf)
+            return samples_gdf
+
         if not self._filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "

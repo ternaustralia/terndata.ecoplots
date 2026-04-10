@@ -7,5 +7,3 @@ API Reference
    api/overview
    api/ecoplots_class
    api/async_ecoplots_class
-
-
