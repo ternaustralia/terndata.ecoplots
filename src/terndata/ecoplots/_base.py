@@ -1715,7 +1715,7 @@ class EcoPlotsBase:
             if not isinstance(user_species_values, (list, tuple)):
                 user_species_values = [user_species_values]
 
-            species_df = self.discover_speciesname()
+            species_df = self.discover_species()
             if "speciesname" in species_df.columns:
                 available_species = [
                     str(v).strip()

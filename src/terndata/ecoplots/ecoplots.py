@@ -132,24 +132,39 @@ class EcoPlots(EcoPlotsBase):
         return pd.Series(pairs, name="count").rename_axis("metric").reset_index()
 
     def preview(self, dformat: Optional[str] = None) -> Union[gpd.GeoDataFrame, dict, str]:
-        """Fetch a small, first-page preview of EcoPlots data.  # noqa: DAR401, D415
+        """Fetch a small preview of EcoPlots data.  # noqa: DAR401, D415
 
-        This method uses the same strategy as `get_data()` but only fetches a small
-        subset (10 records from up to 2 feature types) for quick preview.
+        Mirrors :meth:`get_data` but limits results to 10 records for a quick look.
+
+        In ``observations`` mode, fetches CSV from up to 2 feature types (5 rows each).
+        In ``samples`` mode, calls the samples endpoint and returns the first 10 rows;
+        ``"geojson"``/``"json"`` formats are not supported in this mode.
 
         Args:
             dformat: Output format.
-                - "geojson" or "json": returns a pretty-printed GeoJSON string.
-                - "pandas" (or "pd"): returns a pandas DataFrame.
-                - "geopandas" (or "gpd") (default): returns a GeoDataFrame.
+                - ``"geojson"`` or ``"json"``: returns a GeoJSON dict (observations only).
+                - ``"pandas"`` (or ``"pd"``): returns a :class:`pandas.DataFrame`.
+                - ``"geopandas"`` (or ``"gpd"``) (default): returns a :class:`~geopandas.GeoDataFrame`.
 
         Returns:
             Preview data in the requested format.
 
         Raises:
             EcoPlotsError: If an invalid dformat is provided.
-            RuntimeError: If no feature types found.
+            RuntimeError: If no feature types found (observations mode).
         """
+        if self._mode == "samples":
+            if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
+                raise EcoPlotsError(
+                    "In 'samples' mode, supported dformat values are: "
+                    "'pandas' (or 'pd') and 'geopandas' (or 'gpd')."
+                )
+            samples_gdf = cast(gpd.GeoDataFrame, _run_sync(self.fetch_samples_data()))
+            samples_gdf = samples_gdf.head(10)
+            if dformat in ("pandas", "pd"):
+                return pd.DataFrame(samples_gdf)
+            return samples_gdf
+
         if dformat in ("geojson", "json"):
             geojson_data = _run_sync(self.fetch_data(page_number=1, page_size=10))
             return geojson_data
@@ -523,7 +538,7 @@ class EcoPlots(EcoPlotsBase):
             "Species distribution",
         )
 
-        return cast(pd.DataFrame, self.discover_speciesname())
+        return cast(pd.DataFrame, self.discover_species())
 
     def get_data(
         self,
