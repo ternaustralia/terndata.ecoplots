@@ -354,6 +354,20 @@ class EcoPlots(EcoPlotsBase):
         data = self.discover("observed_property")
         return pd.DataFrame(data)
 
+    def get_used_procedures(self) -> pd.DataFrame:
+        """Get the used procedures available for the current filters.
+
+        Available in both ``observations`` and ``samples`` modes.
+
+        Returns:
+            A DataFrame containing the used procedures.
+        """
+        if self._mode == "samples":
+            data = self.discover_samples("used_procedure")
+        else:
+            data = self.discover("used_procedure")
+        return pd.DataFrame(data)
+
     def get_observation_attributes(self) -> pd.DataFrame:
         """Get the attributes of observations from the applied filters.
         Available only in "observations" mode.

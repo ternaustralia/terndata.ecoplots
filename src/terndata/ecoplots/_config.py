@@ -11,7 +11,7 @@ import tempfile
 
 VERSION = "0.0.7-beta"
 
-API_BASE_URL = "http://ecoplots-test.tern.org.au"
+API_BASE_URL = "https://ecoplots-test.tern.org.au"
 
 CACHE_EXPIRE_SECONDS = 60 * 60 * 24 * 14  # Default cache expiration time: 14 days
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "ecoplots_labels_cache")
@@ -43,6 +43,8 @@ QUERY_FACETS = [
     "observed_property",
     "spatial",
     "project",
+    "date_from",
+    "date_to",
     # "description", #TODO: AI based description to facet mapping
 ]
 
@@ -58,6 +60,8 @@ SAMPLE_QUERY_FACETS = [
     "used_procedure",
     "has_image",
     "spatial",
+    "date_from",
+    "date_to",
 ]
 
 DISCOVERY_FACETS = [
@@ -66,6 +70,7 @@ DISCOVERY_FACETS = [
     "feature_type",
     "observed_property",
     "site_id",
+    "used_procedure",
 ]
 
 SAMPLE_DISCOVERY_FACETS = [
