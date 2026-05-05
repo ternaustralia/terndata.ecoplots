@@ -113,6 +113,7 @@ Next steps
 
 - :doc:`Observations Workflow <api/ecoplots_observations>` — all methods available in observations mode
 - :doc:`Samples Workflow <api/ecoplots_samples>` — all methods available in samples mode
+- :doc:`Workflow reference <workflows>` — end-to-end user guide for sync and async workflows
 - :doc:`Package overview <api/overview>` — constructor parameters, client comparison
 - :doc:`EcoPlots Client <api/ecoplots_class>` — full API reference
 - :doc:`Async EcoPlots client <api/async_ecoplots_class>`
@@ -129,6 +130,7 @@ Next steps
    :hidden:
    :maxdepth: 1
 
+  workflows
    api/ecoplots_observations
    api/ecoplots_samples
    internals

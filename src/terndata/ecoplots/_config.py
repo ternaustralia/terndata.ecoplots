@@ -9,9 +9,9 @@ import tempfile
 
 # Default configuration
 
-VERSION = "0.0.7-beta"
+VERSION = "1.0.0"
 
-API_BASE_URL = "https://ecoplots-test.tern.org.au"
+API_BASE_URL = "https://ecoplots.tern.org.au"
 
 CACHE_EXPIRE_SECONDS = 60 * 60 * 24 * 14  # Default cache expiration time: 14 days
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "ecoplots_labels_cache")

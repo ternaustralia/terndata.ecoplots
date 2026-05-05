@@ -3,6 +3,12 @@ Change Log
 
 Changes over time for the EcoPlots Python library.
 
+v1.0.0 (2026-05-05)
+--------------------
+
+- First stable production release of ``terndata.ecoplots``.
+- Versioning updated across package and documentation to ``1.0.0``.
+
 Beta v7
 -------
 
