@@ -15,10 +15,7 @@
 </p>
 
 ---
-
-Stop writing API boilerplate. `terndata.ecoplots` gives you TERN ecological data in three lines — filtered, validated, and analysis-ready.
-
-Python client for discovering, filtering, and retrieving ecological field data from the **[TERN EcoPlots Portal](https://ecoplots.tern.org.au)**. Pagination, streaming, and response normalisation are handled automatically — you get back a clean `pandas.DataFrame`, `geopandas.GeoDataFrame`, or raw GeoJSON (for observations) with no post-processing required.
+Python client for discovering, filtering, and retrieving ecological field data from the **[TERN EcoPlots Portal](https://ecoplots.tern.org.au)**. Pagination, streaming, and response normalisation are handled automatically — you get back a clean `pandas.DataFrame`, `geopandas.GeoDataFrame`, or `GeoJSON` (for observations) with no post-processing required.
 
 ---
 
@@ -27,7 +24,7 @@ Python client for discovering, filtering, and retrieving ecological field data f
 **Data access**
 - 🔬 **Observations & Samples** — Two purpose-built workflows covering ecological plot observations and physical material samples (soil, plant vouchers, tissue) from TERN's national monitoring network.
 - 🌐 **Full API abstraction** — Pagination, streaming, and response normalisation are handled automatically; you work with clean Python objects, not raw HTTP.
-- 📦 **Analysis-ready outputs** — Observations return a `geopandas.GeoDataFrame` by default; also available as `pandas.DataFrame` or raw GeoJSON. Samples return a `pandas.DataFrame` by default. No post-processing needed.
+- 📦 **Analysis-ready outputs** — Observations return a `geopandas.GeoDataFrame` by default; also available as `pandas.DataFrame` or `GeoJSON`. Samples return a `geopandas.GeoDataFrame` by default with option to fetch as `pandas.DataFrame`. No post-processing needed.
 
 **Discovery & filtering**
 - 🔎 **Validated filters with fuzzy resolution** — Mistyped or partial filter values are caught and corrected before any request is sent, with a ranked list of suggestions.
@@ -86,7 +83,7 @@ ec.select(dataset="TERN Surveillance",
 ec.preview()                              # quick look (first page)
 gdf = ec.get_data()                       # default → GeoDataFrame
 df  = ec.get_data(dformat="pd")           # → pandas DataFrame
-raw = ec.get_data(dformat="geojson")      # → raw GeoJSON (observations only)
+gjson = ec.get_data(dformat="geojson")      # → GeoJSON (observations only)
 ```
 
 ### Samples
@@ -100,7 +97,7 @@ from terndata.ecoplots import EcoPlots
 ec = EcoPlots(mode="samples")
 ec.select(material_sample_type="Plant Voucher Specimen",
           has_images=True)
-df = ec.get_data()                        # default → pandas DataFrame
+gdf = ec.get_data()                        # default → GeoDataFrame
 ```
 
 Samples mode includes two dedicated notebook widgets:
