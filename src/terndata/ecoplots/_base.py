@@ -707,7 +707,6 @@ class EcoPlotsBase:
             input_filters.update(filters)
         if kwargs:
             input_filters.update(kwargs)
-
         # 1. Determine allowed facets based on mode
         allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
         

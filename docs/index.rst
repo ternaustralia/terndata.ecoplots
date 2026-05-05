@@ -36,19 +36,13 @@
 
 About EcoPlots
 ==============
+TERN EcoPlots is a platform designed for searching, discovering, and accessing ecological observations—both from systematic site-based surveys and opportunistic surveys—as well as specimen samples collected during field surveys from various data sources. With TERN EcoPlots, users can search for observation data and specimen samples from systematic surveys across Australia. The platform allows users to integrate data from multiple sources and access it as a comprehensive, ready-to-use data package. Additionally, users can search for specimen samples and request access to these samples for further research.
 
-`TERN EcoPlots <https://ecoplots.tern.org.au>`_ is a platform
-for searching, discovering, and accessing Australian ecological data — from systematic
-site-based surveys and opportunistic observations, to physical specimen samples
-collected during field surveys.
+TERN EcoPlots is developed based on a semantic data integration approach. Datasets are generally received from custodians in various forms, including PostgreSQL databases and CSV file formats. In the data ingestion process, each source dataset is mapped to a `TERN Plot ontology <https://linkeddata.tern.org.au/information-models/tern-ontology>`_ including the identification and mapping of domain feature types, parameters, and categorical values to controlled vocabularies, as well as the performance of data validation routines and the resolution of taxonomic names. All data are organised in Resource Description Framework (RDF) and stored in a triple store.
 
-The platform integrates data from multiple custodians into a single, analysis-ready
-package underpinned by a semantic data model. Source datasets are mapped to the
-`TERN Plot Ontology <https://linkeddata.tern.org.au/information-models/tern-ontology>`_,
-where feature types, parameters, and categorical values are linked to controlled
-vocabularies and stored as RDF in a triple store.
+See also: `EcoPlots Portal <https://ecoplots.tern.org.au>`_.
 
-EcoPlots Python Library
+EcoPlots Python library
 =======================
 
 The ``terndata.ecoplots`` Python library provides a lightweight, Pythonic client
@@ -82,6 +76,31 @@ Installation
 .. code-block:: bash
 
    pip install terndata.ecoplots
+
+Supported Python: 3.10+
+
+Quick start
+===========
+
+**Observations**
+
+.. code-block:: python
+
+   from terndata.ecoplots import EcoPlots
+
+   ec = EcoPlots()                          # mode="observations" by default
+   ec.select(dataset="TERN Surveillance")
+   gdf = ec.get_data()
+
+**Samples**
+
+.. code-block:: python
+
+   from terndata.ecoplots import EcoPlots
+
+   ec = EcoPlots(mode="samples")
+   ec.select(material_sample_type="Plant Voucher Specimen", has_images=True)
+   df = ec.get_data(dformat="pd")
 
 Supported Python: 3.10+
 
