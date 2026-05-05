@@ -36,6 +36,52 @@ _GEOJSON_GEOM = {
 
 _T = TypeVar("_T")
 
+# Matches ordinal suffixes: "21st" → "21", "2nd" → "2", etc.
+_ORDINAL_RE = re.compile(r"(\d+)\s*(?:st|nd|rd|th)\b", re.IGNORECASE)
+
+
+def _parse_date(date_input: str) -> str:
+    """Parse a user-supplied date string and return a normalised ``YYYY-MM-DD`` string.
+
+    Numeric date components are **always** interpreted as **DD-MM-YYYY** (day first).
+    ``MM-DD-YYYY`` is never accepted; if the second component exceeds 12 the
+    date is rejected as out-of-range. Ordinal suffixes (``1st``, ``22nd``,
+    etc.) are stripped automatically before parsing.
+
+    Args:
+        date_input: A human-readable date string in any recognisable format, for example:
+
+            - ``"21/05/2020"``  → ``"2020-05-21"``
+            - ``"21-05-2020"``  → ``"2020-05-21"``
+            - ``"21st May 2020"`` → ``"2020-05-21"``
+            - ``"May 20 2020"`` → ``"2020-05-20"``
+            - ``"2020-05-21"``  → ``"2020-05-21"`` (ISO passthrough)
+
+    Returns:
+        ISO date string ``"YYYY-MM-DD"``.
+
+    Raises:
+        EcoPlotsError: If the string cannot be parsed or represents an
+            out-of-range date (e.g. month > 12 when treated as DD-MM-YYYY).
+    """
+    from dateutil import parser as _dateutil_parser
+
+    if not isinstance(date_input, str):
+        date_input = str(date_input)
+
+    # Strip ordinal suffixes before handing off to dateutil.
+    cleaned = _ORDINAL_RE.sub(r"\1", date_input).strip()
+
+    try:
+        dt = _dateutil_parser.parse(cleaned, dayfirst=True)
+    except (ValueError, OverflowError):
+        raise EcoPlotsError(
+            f"Cannot parse date {date_input!r}. Use a recognisable format such as "
+            "'DD/MM/YYYY', '21 May 2020', '21st May 2020', or 'YYYY-MM-DD'."
+        )
+
+    return dt.strftime("%Y-%m-%d")
+
 
 async def _get_single_label(facet: str) -> dict[str, str]:
     """Fetch labels for a single facet from the API.

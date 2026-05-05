@@ -1,12 +1,12 @@
 [project]
 name = "terndata.ecoplots"
 description = "TERN ecoplots data access library"
-readme = "README.md"
+readme = {file = "README.md", content-type = "text/markdown"}
 license = "Apache-2.0"
 authors = [{name = "Avinash Chandra", email = "avinash.chandra@uq.edu.au"}]
 maintainers = [{name = "TERN Data Services and Analytics (TDSA)", email = "esupport@tern.org.au"}]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Education",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python",
@@ -39,7 +39,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 write_to = "src/terndata/ecoplots/version.py"
-fallback_version = "0.0.0.dev0"
+fallback_version = "1.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

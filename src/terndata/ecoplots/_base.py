@@ -36,7 +36,7 @@ from ._nlp_utils import (
     resolve_region_type,
     validate_facet,
 )
-from ._utils import _ensure_ecoproj_path, _validate_spatial_input
+from ._utils import _ensure_ecoproj_path, _parse_date, _validate_spatial_input
 
 SelfType = TypeVar("SelfType", bound="EcoPlotsBase")
 
@@ -132,7 +132,7 @@ class EcoPlotsBase:
             >>> print(ec)
             ╔══════════════════════════════════════════════════════════════════════════════╗
             ║ EcoPlots Observations                                                        ║
-            ║ Version: 0.0.4-beta                                                          ║
+            ║ Version: 1.0.0                                                               ║
             ╠══════════════════════════════════════════════════════════════════════════════╣
             ║ Active Filters:                                                              ║
             ║   • site_id: TCFTNS0002                                                      ║
@@ -510,6 +510,13 @@ class EcoPlotsBase:
                 - ``soil_depth_range`` (``[min, max]`` or
                   ``{"min": x, "max": y}``, *samples* mode only): Filter
                   samples by soil depth in metres.
+                - ``date_from`` (``str``): Earliest date (inclusive) in any
+                  recognisable format — ``"DD/MM/YYYY"``, ``"21 May 2020"``,
+                  ``"21st May 2020"``, ``"YYYY-MM-DD"`` etc. Normalised to
+                  ``"YYYY-MM-DD"`` internally. Day-first is assumed for
+                  all-numeric inputs (``MM-DD-YYYY`` is never accepted).
+                - ``date_to`` (``str``): Latest date (inclusive), same format
+                  rules as ``date_from``.
 
         Raises:
             EcoPlotsError: Unknown filter keys.
@@ -650,6 +657,10 @@ class EcoPlotsBase:
                    max_depth
                 ]
                 continue
+            if k in ("date_from", "date_to"):
+                parsed = _parse_date(v if isinstance(v, str) else str(v))
+                self._filters[k] = parsed
+                continue
             if not isinstance(v, (list, tuple)):
                 v = [v]
             if k in self._filters:
@@ -696,7 +707,6 @@ class EcoPlotsBase:
             input_filters.update(filters)
         if kwargs:
             input_filters.update(kwargs)
-
         # 1. Determine allowed facets based on mode
         allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
         
@@ -779,6 +789,56 @@ class EcoPlotsBase:
             self._filters = {}
             self._query_filters = {}
         return self
+
+    def from_date(self: SelfType, date: str) -> SelfType:
+        """Set an earliest-date filter (inclusive).
+
+        Chainable with :meth:`till`. The date string is parsed tolerantly —
+        ``"DD/MM/YYYY"``, ``"21 May 2020"``, ``"21st May 2020"``,
+        ``"YYYY-MM-DD"`` etc. are all accepted. For all-numeric inputs the
+        day-first convention (``DD-MM-YYYY``) is always used.
+
+        Equivalent to ``select(date_from=date)``.
+
+        Args:
+            date: Start date in any recognisable human format.
+
+        Returns:
+            self (chainable)
+
+        Raises:
+            EcoPlotsError: If the date string cannot be parsed.
+
+        Examples:
+            .. code-block:: python
+
+                ec.select(site_id="ABC").from_date("01/01/2020").to_date("31/12/2022")
+        """
+        return self.select(date_from=date)
+
+    def to_date(self: SelfType, date: str) -> SelfType:
+        """Set a latest-date filter (inclusive).
+
+        Chainable with :meth:`from_date`. Accepts the same flexible date
+        formats — ``"DD/MM/YYYY"``, ``"31 Dec 2022"``, ``"YYYY-MM-DD"``, etc.
+
+        Equivalent to ``select(date_to=date)``.
+
+        Args:
+            date: End date in any recognisable human format.
+
+        Returns:
+            self (chainable)
+
+        Raises:
+            EcoPlotsError: If the date string cannot be parsed.
+
+        Examples:
+            .. code-block:: python
+
+                ec.select(site_id="ABC").from_date("01/01/2020").to_date("31/12/2022")
+        """
+        return self.select(date_to=date)
 
     def get_filter(self, facet: Optional[str] = None) -> Union[list, dict, None]:
         """Return the current filter values for a specific facet or all applied filters.
@@ -916,7 +976,7 @@ class EcoPlotsBase:
                 query[facet] = self._query_filters[facet]
 
         # Additional query-side sample filters used by dedicated sample discovery endpoints.
-        for facet in ("soil_subsite_id", "soil_depth_range"):
+        for facet in ("soil_subsite_id", "soil_depth_range", "date_from", "date_to"):
             if facet in self._query_filters:
                 query[facet] = self._query_filters[facet]
 
@@ -1710,6 +1770,12 @@ class EcoPlotsBase:
         if "soil_depth_range" in all_matched:
             query_filters["soil_depth_range"] = all_matched["soil_depth_range"]
 
+        if "date_from" in all_matched:
+            query_filters["date_from"] = all_matched["date_from"]
+
+        if "date_to" in all_matched:
+            query_filters["date_to"] = all_matched["date_to"]
+
         if "speciesname" in all_matched:
             user_species_values = all_matched.get("speciesname", [])
             if not isinstance(user_species_values, (list, tuple)):
@@ -1790,6 +1856,8 @@ class EcoPlotsBase:
                 "soil_subsite_id",
                 "soil_depth_range",
                 "speciesname",
+                "date_from",
+                "date_to",
             }
         }
 
