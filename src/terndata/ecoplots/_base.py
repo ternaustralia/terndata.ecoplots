@@ -39,6 +39,7 @@ from ._nlp_utils import (
 from ._utils import _ensure_ecoproj_path, _parse_date, _validate_spatial_input
 
 SelfType = TypeVar("SelfType", bound="EcoPlotsBase")
+PROJECT_FILE_VERSION = 1
 
 
 class EcoPlotsBase:
@@ -160,11 +161,11 @@ class EcoPlotsBase:
             lines.append(f"║ {'Active Filters:':<{BOX_WIDTH - 2}} ║")
             for key, value in self._filters.items():
                 value_str = str(value)
-                
+
                 # First line: "  • key: "
                 prefix = f"  • {key}: "
                 max_first_line = BOX_WIDTH - 2 - len(prefix)
-                
+
                 if len(value_str) <= max_first_line:
                     # Fits on one line
                     content = f"{prefix}{value_str}"
@@ -175,11 +176,11 @@ class EcoPlotsBase:
                     first_chunk = value_str[:max_first_line]
                     content = f"{prefix}{first_chunk}"
                     lines.append(f"║ {content:<{BOX_WIDTH - 2}} ║")
-                    
+
                     # Continuation lines
                     remaining = value_str[max_first_line:]
                     max_cont_line = BOX_WIDTH - 2 - len(INDENT)
-                    
+
                     while remaining:
                         chunk = remaining[:max_cont_line]
                         remaining = remaining[max_cont_line:]
@@ -476,7 +477,7 @@ class EcoPlotsBase:
                 del ec['site_id', ['A','B','C']]        # remove multiple values
         """
         allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
-        
+
         if isinstance(key, tuple):
             if len(key) != 2:
                 raise KeyError("Expected ('facet', values) for value deletion.")
@@ -557,7 +558,7 @@ class EcoPlotsBase:
 
         # 1. Determine allowed facets based on mode
         allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
-        
+
         # 2. Validate allowed keys
         invalid_keys = set(input_filters) - set(allowed_facets)
         if invalid_keys:
@@ -643,19 +644,12 @@ class EcoPlotsBase:
                     min_depth = float(min_depth)
                     max_depth = float(max_depth)
                 except (TypeError, ValueError):
-                    raise EcoPlotsError(
-                        "'soil_depth_range' min/max must be numeric values."
-                    )
+                    raise EcoPlotsError("'soil_depth_range' min/max must be numeric values.")
 
                 if max_depth <= min_depth:
-                    raise EcoPlotsError(
-                        "Invalid 'soil_depth_range': max must be greater than min."
-                    )
+                    raise EcoPlotsError("Invalid 'soil_depth_range': max must be greater than min.")
 
-                self._filters["soil_depth_range"] = [
-                   min_depth,
-                   max_depth
-                ]
+                self._filters["soil_depth_range"] = [min_depth, max_depth]
                 continue
             if k in ("date_from", "date_to"):
                 parsed = _parse_date(v if isinstance(v, str) else str(v))
@@ -709,7 +703,7 @@ class EcoPlotsBase:
             input_filters.update(kwargs)
         # 1. Determine allowed facets based on mode
         allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
-        
+
         # 2. Validate allowed keys
         invalid_keys = set(input_filters) - set(allowed_facets)
         if invalid_keys:
@@ -855,11 +849,12 @@ class EcoPlotsBase:
             mapping each applied facet to its list of values.
         """
         if facet:
-            facet_val = resolve_facet(facet, QUERY_FACETS)
+            allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
+            facet_val = resolve_facet(facet, allowed_facets)
             if facet_val:
                 return self._filters.get(facet_val)
             raise EcoPlotsError(
-                f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
+                f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(allowed_facets)
             )
 
         return self._filters
@@ -879,11 +874,12 @@ class EcoPlotsBase:
             returns a ``dict`` of all resolved query filters.
         """
         if facet:
-            facet_val = resolve_facet(facet, QUERY_FACETS)
+            allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
+            facet_val = resolve_facet(facet, allowed_facets)
             if facet_val:
                 return self._query_filters.get(facet_val)
             raise EcoPlotsError(
-                f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(QUERY_FACETS)
+                f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(allowed_facets)
             )
 
         return self._query_filters
@@ -926,7 +922,7 @@ class EcoPlotsBase:
         resp = requests.post(url, json=payload, timeout=60)
         resp.raise_for_status()
         return orjson.loads(resp.content)
-    
+
     def discover_samples(
         self,
         discovery_facet: str,
@@ -956,13 +952,15 @@ class EcoPlotsBase:
 
         if not facet_param:
             raise EcoPlotsError(f"Invalid discovery facet: {discovery_facet}")
-        
+
         if discovery_facet == "dataset":
             # hardcoded, doesn't change
-            return [{
-                "key": "TERN Ecosystem Surveillance",
-                "uri": "http://linked.data.gov.au/dataset/ausplots",
-            }]
+            return [
+                {
+                    "key": "TERN Ecosystem Surveillance",
+                    "uri": "http://linked.data.gov.au/dataset/ausplots",
+                }
+            ]
 
         url = f"{self._base_url}/api/v1.0/ui/facet/samples"
 
@@ -1014,7 +1012,7 @@ class EcoPlotsBase:
             parsed = parsed["aggregations"]["region_type"]["buckets"]
             if not isinstance(parsed, list):
                 return []
-            
+
             # Remove doc_count and add uri from cache
             with Cache(CACHE_DIR) as cache:
                 region_type_map = cache.get("region_type", {})
@@ -1024,13 +1022,13 @@ class EcoPlotsBase:
                         key = res.get("key")
                         res["uri"] = key
                         res["key"] = region_type_map.get(key, "N/A")
-        
+
         elif discovery_facet == "region":
             # Ensure we have a list
             parsed = parsed["aggregations"]["region"]["buckets"]
             if not isinstance(parsed, list):
                 return []
-            
+
             # Remove doc_count and add uri from cache
             with Cache(CACHE_DIR) as cache:
                 region_map = cache.get("region", {})
@@ -1045,7 +1043,7 @@ class EcoPlotsBase:
             parsed = parsed["aggregations"][facet_param]["value"]["buckets"]
             if not isinstance(parsed, list):
                 return []
-            
+
             for res in parsed:
                 if isinstance(res, dict):
                     res.pop("doc_count", None)
@@ -1057,7 +1055,7 @@ class EcoPlotsBase:
             parsed = parsed["aggregations"][facet_param]["value"]["buckets"]
             if not isinstance(parsed, list):
                 return []
-            
+
             with Cache(CACHE_DIR) as cache:
                 facet_map = cache.get(facet_param, {})
                 for res in parsed:
@@ -1077,7 +1075,6 @@ class EcoPlotsBase:
                     res.pop("doc_count", None)
 
         return parsed
-    
 
     def discover_soil_depth_range(self):
         """Discover soil depth range aggregates for the current query.
@@ -1297,21 +1294,21 @@ class EcoPlotsBase:
                 f"{self._base_url}/api/v1.0/data/stream?dformat={dformat}",
                 json=payload,
                 timeout=timeout,
-                headers={"Accept": "text/event-stream"}
+                headers={"Accept": "text/event-stream"},
             ) as resp:
                 resp.raise_for_status()
-                
+
                 chunks = []
                 async for line in resp.content:
-                    line = line.decode('utf-8').strip()
+                    line = line.decode("utf-8").strip()
                     if line:
                         chunks.append(line)
                 # Combine all chunks into final response
                 if dformat == "csv":
-                    return '\n'.join(chunks).encode('utf-8')
+                    return "\n".join(chunks).encode("utf-8")
                 else:
                     # For GeoJSON, parse the complete JSON response
-                    complete_data = ''.join(chunks)
+                    complete_data = "".join(chunks)
                     return orjson.loads(complete_data)
 
     async def fetch_samples_data(self):
@@ -1356,10 +1353,7 @@ class EcoPlotsBase:
                 f"got {len(material_sample_types)}"
             )
 
-        payload = {
-            "query": copy.deepcopy(self._query_filters),
-            "context": "samples"
-        }
+        payload = {"query": copy.deepcopy(self._query_filters), "context": "samples"}
 
         has_image = bool(payload["query"].pop("has_image", False))
 
@@ -1401,6 +1395,7 @@ class EcoPlotsBase:
         hits = data.get("hits", {}).get("hits", [])
 
         if has_image:
+
             def _has_sample_images(value):
                 if not isinstance(value, list):
                     return False
@@ -1414,7 +1409,8 @@ class EcoPlotsBase:
                 return False
 
             hits = [
-                hit for hit in hits
+                hit
+                for hit in hits
                 if _has_sample_images((hit.get("_source", {}) or {}).get("sample_images"))
             ]
 
@@ -1567,9 +1563,9 @@ class EcoPlotsBase:
             gdf = gdf.dropna(axis=1, how="all")
 
             if "sample_images" in gdf.columns:
-                has_any_sample_image = gdf["sample_images"].apply(
-                    lambda v: isinstance(v, list) and len(v) > 0
-                ).any()
+                has_any_sample_image = (
+                    gdf["sample_images"].apply(lambda v: isinstance(v, list) and len(v) > 0).any()
+                )
                 if not has_any_sample_image:
                     gdf = gdf.drop(columns=["sample_images"])
 
@@ -1681,11 +1677,12 @@ class EcoPlotsBase:
         # Header: MAGIC (4) | VERSION (1) | SHA256 (32) | LEN (8, big-endian)
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".ecoproj")
         tmp_path = Path(tmp.name)
+        tmp.close()
 
         try:
             with open(tmp_path, "wb") as f:
                 f.write(MAGIC)
-                f.write(struct.pack(">B", VERSION))
+                f.write(struct.pack(">B", PROJECT_FILE_VERSION))
                 f.write(sha)
                 f.write(struct.pack(">Q", len(body)))
                 f.write(body)
@@ -1728,8 +1725,10 @@ class EcoPlotsBase:
             if f.read(4) != MAGIC:
                 raise EcoPlotsError("Invalid project file (bad magic).")
             ver = struct.unpack(">B", f.read(1))[0]
-            if ver != VERSION:
-                raise EcoPlotsError(f"Incompatible project version: {ver} (expected {VERSION}).")
+            if ver != PROJECT_FILE_VERSION:
+                raise EcoPlotsError(
+                    f"Incompatible project version: {ver} " f"(expected {PROJECT_FILE_VERSION})."
+                )
             sha = f.read(32)
             n = struct.unpack(">Q", f.read(8))[0]
             body = f.read(n)
@@ -1914,13 +1913,13 @@ class EcoPlotsBase:
         self._filters = all_matched
 
         return True
-    
+
     def _fetch_clusters(self, geojson: Optional[dict] = None) -> dict:
         """Fetch clustered data points for map visualization.
 
         Args:
             geojson: Optional GeoJSON polygon to define the area of interest.
-        
+
         Returns:
             Parsed JSON payload containing clustered data points.
 
@@ -1930,27 +1929,27 @@ class EcoPlotsBase:
         payload = {
             "query": copy.deepcopy(self._query_filters),
             "clustering_precision": 3,
-            "geojson": geojson or {
-                "type":"Polygon",
+            "geojson": geojson
+            or {
+                "type": "Polygon",
                 "coordinates": [
                     [
-                        [107.68366383276675,-9.83285528397626],
-                        [159.86061589572708,-9.83285528397626],
-                        [159.86061589572708,-44.49207177551449],
-                        [107.68366383276675,-44.49207177551449],
-                        [107.68366383276675,-9.83285528397626]
+                        [107.68366383276675, -9.83285528397626],
+                        [159.86061589572708, -9.83285528397626],
+                        [159.86061589572708, -44.49207177551449],
+                        [107.68366383276675, -44.49207177551449],
+                        [107.68366383276675, -9.83285528397626],
                     ]
-                ]
-            }
+                ],
+            },
         }
-
 
         if self._mode == "samples":
             payload["context"] = "samples"
             has_image = payload["query"].pop("has_image", None)
             if has_image is True:
                 payload["has_image"] = True
-       
+
         resp = requests.post(
             f"{self._base_url}/api/v1.0/ui/map/clusters",
             json=payload,
@@ -1960,7 +1959,9 @@ class EcoPlotsBase:
         resp.raise_for_status()
         return orjson.loads(resp.content)
 
-    def _ensure_required_material_sample_types(self, required_labels: list[str], context: str) -> None:
+    def _ensure_required_material_sample_types(
+        self, required_labels: list[str], context: str
+    ) -> None:
         """Ensure at least one required material sample type is selected.
 
         Args:
@@ -1978,11 +1979,7 @@ class EcoPlotsBase:
         else:
             selected_uris = set(selected)
 
-        required_uris = {
-            label_to_uri[label]
-            for label in required_labels
-            if label in label_to_uri
-        }
+        required_uris = {label_to_uri[label] for label in required_labels if label in label_to_uri}
 
         has_any_required = bool(selected_uris.intersection(required_uris))
 
