@@ -122,20 +122,23 @@ async def _cache_labels() -> dict:
         - Intended for internal use only.
     """
     cache = diskcache.Cache(CACHE_DIR)
+    try:
 
-    async def fetch_and_cache(facet):
-        # Only fetch if cache is missing or expired
-        # Check if cache exists and is not expired
-        if cache.get(facet, default=None, read=True) is not None:
-            # print(f"Using cached labels for facet: {facet}")
-            return facet, cache[facet]
-        labels = await _get_single_label(facet)
-        cache.set(facet, labels, expire=CACHE_EXPIRE_SECONDS)
-        return facet, labels
+        async def fetch_and_cache(facet):
+            # Only fetch if cache is missing or expired
+            # Check if cache exists and is not expired
+            if cache.get(facet, default=None, read=True) is not None:
+                # print(f"Using cached labels for facet: {facet}")
+                return facet, cache[facet]
+            labels = await _get_single_label(facet)
+            cache.set(facet, labels, expire=CACHE_EXPIRE_SECONDS)
+            return facet, labels
 
-    tasks = [fetch_and_cache(facet) for facet in VOCAB_FACETS]
-    results = await asyncio.gather(*tasks)
-    return dict(results)
+        tasks = [fetch_and_cache(facet) for facet in VOCAB_FACETS]
+        results = await asyncio.gather(*tasks)
+        return dict(results)
+    finally:
+        cache.close()
 
 
 def _background_cache_loader() -> None:
@@ -147,7 +150,12 @@ def _background_cache_loader() -> None:
         - This function is intended to be run in the background.
         - Intended for internal use only.
     """
-    asyncio.run(_cache_labels())
+    try:
+        asyncio.run(_cache_labels())
+    except (aiohttp.ClientError, OSError, RuntimeError, TimeoutError, KeyError, ValueError):
+        # Cache warming is optional; imports must remain usable offline or when
+        # the EcoPlots API is temporarily unavailable.
+        return
 
 
 def _run_sync(coro: Coroutine[Any, Any, _T]) -> _T:
@@ -200,12 +208,15 @@ def _get_cached_labels(facet: Optional[str] = None) -> dict:
         - Intended for internal use only.
     """
     cache = diskcache.Cache(CACHE_DIR)
-    if facet:
-        labels = cache.get(facet)
-        if labels is None:
-            raise KeyError(f"No cached labels found for facet: {facet}")
-        return labels
-    return {}
+    try:
+        if facet:
+            labels = cache.get(facet)
+            if labels is None:
+                raise KeyError(f"No cached labels found for facet: {facet}")
+            return labels
+        return {}
+    finally:
+        cache.close()
 
 
 def _is_wkt(s: str) -> bool:
