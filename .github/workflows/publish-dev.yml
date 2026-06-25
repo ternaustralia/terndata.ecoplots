@@ -1,9 +1,9 @@
-name: Upload development package to PyPI from dev
+name: Upload development package to PyPI from develop
 
 on:
   push:
     branches:
-      - dev
+      - develop
   workflow_dispatch:
 
 jobs:
