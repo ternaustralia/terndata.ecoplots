@@ -17,10 +17,16 @@ Operational Modes:
 Public API:
     - :class:`~terndata.ecoplots.ecoplots.EcoPlots` — synchronous client for scripts and notebooks
     - :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` — async counterpart for ASGI apps or
-        parallel I/O in notebooks
+        parallel I/O, installed with ``terndata.ecoplots[async]``
 
     Returned results integrate naturally with analysis tools (e.g., ``pandas.DataFrame``,
-    ``geopandas.GeoDataFrame``) or can be consumed as raw GeoJSON.
+    ``geopandas.GeoDataFrame``), Parquet bytes, or raw GeoJSON for observations.
+
+Install modules:
+    - ``pip install terndata.ecoplots``: sync client, observations/samples workflows,
+      discovery, filtering, data and attribute retrieval, Parquet output.
+    - ``pip install "terndata.ecoplots[async]"``: async transport and streaming.
+    - ``pip install "terndata.ecoplots[gui]"``: Jupyter/ipyleaflet/ipywidgets helpers.
 
 Side Effects:
     On import, EcoPlots may start a **best-effort, background cache preloader** to warm up
@@ -46,10 +52,11 @@ Quick Start:
 
         from terndata.ecoplots import EcoPlots
 
-        ec = EcoPlots(mode="samples")
+        ec = EcoPlots("samples")
         ec.select(material_sample_type="Plant Tissue Sample")
         gdf = ec.get_data(dformat="gpd")
         df = ec.get_data(dformat="pd")
+        parquet_bytes = ec.get_data(dformat="pq")
 
     Asynchronous:
 
@@ -62,6 +69,8 @@ Quick Start:
             ec = AsyncEcoPlots()
             ec.select(site_id="TCFTNS0002")
             gdf = await ec.get_data()
+            async for chunk in ec.get_data_stream(dformat="gpd"):
+                ...
             return gdf
 
         # asyncio.run(main())
@@ -74,7 +83,7 @@ Quick Start:
         from terndata.ecoplots import AsyncEcoPlots
 
         async def main_samples():
-            ec = AsyncEcoPlots(mode="samples")
+            ec = AsyncEcoPlots("samples")
             ec.select(material_sample_type="Plant Tissue Sample")
             gdf = await ec.get_data(dformat="gpd")
             df = await ec.get_data(dformat="pd")

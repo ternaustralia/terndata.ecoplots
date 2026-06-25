@@ -95,4 +95,4 @@ suppress_warnings = [
     "ref.python",   # 'more than one target found' and duplicate object descriptions
 ]
 
-exclude_patterns = ["api/modules.rst"]
+exclude_patterns = ["api/modules.rst", "api_internal/**"]

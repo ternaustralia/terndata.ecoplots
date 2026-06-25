@@ -7,6 +7,16 @@ Overview
 ``EcoPlots`` is the synchronous client. It is the best choice for most notebook
 and script workflows, especially if you are new to Python.
 
+Install with:
+
+.. code-block:: bash
+
+   pip install terndata.ecoplots
+
+The standard install includes observations and samples mode, discovery,
+filtering, data retrieval, site/site-visit attribute data, and Parquet output.
+Install ``terndata.ecoplots[gui]`` only when you need Jupyter widget helpers.
+
 Constructor Parameters
 ----------------------
 
@@ -14,7 +24,7 @@ Signature:
 
 .. code-block:: python
 
-   EcoPlots(filterset=None, query_filters=None, mode="observations")
+   EcoPlots(mode="observations", filterset=None, query_filters=None)
 
 What each parameter means:
 
@@ -36,7 +46,8 @@ What each parameter means:
      - No. Keep this internal.
    * - ``mode``
      - ``str``
-     - ``"observations"`` (default) or ``"samples"``.
+     - ``"observations"`` (default) or ``"samples"``. Case and close
+       spellings are resolved automatically.
      - Yes, only when you intentionally need samples workflows.
 
 Internal Variables: Do Not Edit Manually
@@ -83,5 +94,3 @@ The ``EcoPlots`` class supports several magic methods inherited from ``EcoPlotsB
 **Copying:**
   - ``__copy__()`` - Shallow copy support (``copy.copy(ecoplots)``)
   - ``__deepcopy__(memo)`` - Deep copy support (``copy.deepcopy(ecoplots)``)
-
-

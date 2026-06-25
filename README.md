@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://pypi.org/project/terndata.ecoplots/"><img src="https://img.shields.io/pypi/v/terndata.ecoplots.svg?logo=pypi&logoColor=white" alt="PyPI"></a>
   <a href="https://pypi.org/project/terndata.ecoplots/"><img src="https://img.shields.io/pypi/pyversions/terndata.ecoplots.svg?logo=python&logoColor=white" alt="Python versions"></a>
+  <a href="https://pepy.tech/project/terndata-ecoplots"><img src="https://img.shields.io/pepy/dt/terndata.ecoplots?logo=pypi&label=downloads" alt="PyPI downloads"></a>
   <a href="https://terndata-ecoplots.readthedocs.io/en/latest/"><img src="https://img.shields.io/readthedocs/terndata-ecoplots.svg?logo=readthedocs" alt="Docs"></a>
   <a href="https://github.com/ternaustralia/terndata.ecoplots/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ternaustralia/terndata.ecoplots.svg" alt="License"></a>
   <a href="https://github.com/ternaustralia/terndata.ecoplots"><img src="https://img.shields.io/badge/GitHub-Repo-181717?logo=github&logoColor=white" alt="GitHub"></a>
@@ -24,7 +25,7 @@ Python client for discovering, filtering, and retrieving ecological field data f
 **Data access**
 - 🔬 **Observations & Samples** — Two purpose-built workflows covering ecological plot observations and physical material samples (soil, plant vouchers, tissue) from TERN's national monitoring network.
 - 🌐 **Full API abstraction** — Pagination, streaming, and response normalisation are handled automatically; you work with clean Python objects, not raw HTTP.
-- 📦 **Analysis-ready outputs** — Observations return a `geopandas.GeoDataFrame` by default; also available as `pandas.DataFrame` or `GeoJSON`. Samples return a `geopandas.GeoDataFrame` by default with option to fetch as `pandas.DataFrame`. No post-processing needed.
+- 📦 **Analysis-ready outputs** — Observations and samples return a `geopandas.GeoDataFrame` by default; also available as `pandas.DataFrame` or Parquet bytes. Observations can also be returned as GeoJSON.
 
 **Discovery & filtering**
 - 🔎 **Validated filters with fuzzy resolution** — Mistyped or partial filter values are caught and corrected before any request is sent, with a ranked list of suggestions.
@@ -46,8 +47,17 @@ Python client for discovering, filtering, and retrieving ecological field data f
 pip install terndata.ecoplots
 ```
 
+The standard install includes the synchronous client, observations and samples workflows, discovery/filtering, data retrieval, attribute data retrieval, and Parquet output.
+
+Optional modules:
+
+```sh
+pip install "terndata.ecoplots[async]"  # AsyncEcoPlots and async streaming transport
+pip install "terndata.ecoplots[gui]"    # Jupyter/ipyleaflet/ipywidgets helpers
+```
+
 Supported Python: **3.10, 3.11, 3.12, 3.13**  
-Key dependencies: `aiohttp`, `geopandas`, `ipyleaflet`, `ipywidgets`, `rapidfuzz`, `orjson`
+Core dependencies include `geopandas`, `pandas`, `pyarrow`, `requests`, `rapidfuzz`, and `orjson`. Async and GUI dependencies are installed only when their extras are requested.
 
 ---
 
@@ -83,7 +93,11 @@ ec.select(dataset="TERN Surveillance",
 ec.preview()                              # quick look (first page)
 gdf = ec.get_data()                       # default → GeoDataFrame
 df  = ec.get_data(dformat="pd")           # → pandas DataFrame
-gjson = ec.get_data(dformat="geojson")      # → GeoJSON (observations only)
+pq  = ec.get_data(dformat="pq")           # → Parquet bytes
+gjson = ec.get_data(dformat="geojson")    # → GeoJSON (observations only)
+ec.export_data("outputs/ecoplots.parquet") # retrieve and save directly
+sites = ec.get_sites(include_region=True) # site region columns included
+site_attrs = ec.get_site_attributes_data()
 ```
 
 ### Samples
@@ -94,10 +108,13 @@ tissue samples, and more — with access to IGSN identifiers and sample images.
 ```python
 from terndata.ecoplots import EcoPlots
 
-ec = EcoPlots(mode="samples")
+ec = EcoPlots("samples")
 ec.select(material_sample_type="Plant Voucher Specimen",
-          has_images=True)
+          has_image=True)
 gdf = ec.get_data()                        # default → GeoDataFrame
+pq = ec.get_data(dformat="pq")             # Parquet bytes
+ec.export_data("outputs/samples.csv")      # retrieve and save directly
+sites = ec.get_sites(include_region=True)  # enrich sites with region columns
 ```
 
 Samples mode includes two dedicated notebook widgets:
@@ -112,7 +129,7 @@ Samples mode includes two dedicated notebook widgets:
 
 ### Async client (`AsyncEcoPlots`)
 
-For async/ASGI services or concurrent I/O pipelines, use `AsyncEcoPlots` — it has the same interface as `EcoPlots` with `await`-able retrieval methods. Both modes, all filters, and all widgets are fully supported.
+For async/ASGI services or concurrent I/O pipelines, install the async extra and use `AsyncEcoPlots` — it has the same interface as `EcoPlots` with `await`-able retrieval methods. Both modes and all filters are supported.
 
 ```python
 from terndata.ecoplots import AsyncEcoPlots
@@ -120,6 +137,9 @@ from terndata.ecoplots import AsyncEcoPlots
 ec = AsyncEcoPlots()
 ec.select(site_id="TCFTNS0002")
 gdf = await ec.get_data()        # non-blocking fetch
+
+async for chunk in ec.get_data_stream(dformat="gpd"):
+    ...
 ```
 
 ---
@@ -187,6 +207,10 @@ All checks are also available via `tox` — see `tox.ini` for environment defini
 ## Citation
 
 Terrestrial Ecosystem Research Network (2026). *terndata.ecoplots: A Python package for accessing TERN EcoPlots data*. https://pypi.org/project/terndata.ecoplots/
+
+For citation metadata, see [`CITATION.cff`](CITATION.cff). This cites the
+software tool itself; data accessed through EcoPlots may require separate
+dataset-specific citation and attribution.
 
 ---
 

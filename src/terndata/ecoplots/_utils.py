@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, TypeVar
 
-import aiohttp
 import diskcache
 import geopandas as gpd
 import orjson
@@ -99,6 +98,8 @@ async def _get_single_label(facet: str) -> dict[str, str]:
         - Performs network I/O
         - Intended for internal use only.
     """
+    import aiohttp
+
     url = f"{API_BASE_URL}/api/v1.0/data/label/{facet}"
     timeout = aiohttp.ClientTimeout(total=60, sock_read=60, sock_connect=10)
     async with aiohttp.ClientSession() as session:
@@ -152,7 +153,7 @@ def _background_cache_loader() -> None:
     """
     try:
         asyncio.run(_cache_labels())
-    except (aiohttp.ClientError, OSError, RuntimeError, TimeoutError, KeyError, ValueError):
+    except Exception:
         # Cache warming is optional; imports must remain usable offline or when
         # the EcoPlots API is temporarily unavailable.
         return

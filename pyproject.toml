@@ -1,10 +1,19 @@
 [project]
 name = "terndata.ecoplots"
-description = "TERN ecoplots data access library"
+description = "Python client for discovering, filtering, and retrieving TERN EcoPlots observation and sample data"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = "Apache-2.0"
 authors = [{name = "Avinash Chandra", email = "avinash.chandra@uq.edu.au"}]
 maintainers = [{name = "TERN Data Services and Analytics (TDSA)", email = "esupport@tern.org.au"}]
+keywords = [
+    "TERN",
+    "EcoPlots",
+    "ecology",
+    "biodiversity",
+    "environmental-data",
+    "geospatial",
+    "research-data",
+]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Education",
@@ -23,9 +32,14 @@ dynamic = ["version", "dependencies", "optional-dependencies"]
 [project.urls]
 Home = "https://github.com/ternaustralia/terndata.ecoplots"
 Documentation = "https://terndata-ecoplots.readthedocs.io"
+Repository = "https://github.com/ternaustralia/terndata.ecoplots"
+Issues = "https://github.com/ternaustralia/terndata.ecoplots/issues"
+Changelog = "https://terndata-ecoplots.readthedocs.io/en/latest/changelog.html"
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
+optional-dependencies.gui = { file = ["requirements-gui.txt"] }
+optional-dependencies.async = { file = ["requirements-async.txt"] }
 # optional-dependencies.test = { file = ["requirements-test.txt"] }
 # optional-dependencies.docs = { file = ["requirements-docs.txt"] }
 # optional-dependencies.flake8 = { file = ["requirements-flake8.txt"] }
@@ -35,6 +49,7 @@ requires = ["setuptools", "setuptools_scm[toml]"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-data]
+"terndata.ecoplots" = ["py.typed"]
 "terndata.ecoplots.assets" = ["*.png", "*.svg", "*.jpg", "*.jpeg", "*.gif"]
 
 [tool.setuptools_scm]

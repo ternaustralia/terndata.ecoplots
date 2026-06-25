@@ -10,7 +10,7 @@ such as IGSN identifiers and sample images.
 
    from terndata.ecoplots import EcoPlots
 
-   ec = EcoPlots(mode="samples")                         # enable samples mode
+   ec = EcoPlots("samples")                              # enable samples mode
    ec.select(material_sample_type="Soil Pit Sample")     # pick a sample type
    ec.preview()
    df = ec.get_data(dformat="pd")                        # returns a DataFrame
@@ -21,7 +21,8 @@ such as IGSN identifiers and sample images.
    :class:`~terndata.ecoplots.ecoplots.EcoPlots` (synchronous) and
    :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` (asynchronous).
    For ``AsyncEcoPlots``, use ``df = await ec.get_data(dformat="pd")`` in the
-   final step.
+   final step, or ``async for chunk in ec.get_data_stream(...)`` for streaming
+   workflows.
 
 .. note::
 
@@ -45,8 +46,11 @@ Creating the Client
 
    from terndata.ecoplots import EcoPlots
 
-   # Pass mode="samples" at creation time
-   ec = EcoPlots(mode="samples")
+   # Pass samples mode at creation time
+   ec = EcoPlots("samples")
+
+   # Case and close spellings are resolved automatically
+   ec = EcoPlots("SAMPLE")
 
    # Or reload a saved samples project
    ec = EcoPlots.load("my_samples.ecoproj")
@@ -167,6 +171,15 @@ Sites
 .. automethod:: EcoPlots.get_sites
    :no-index:
 
+**Example**
+
+.. code-block:: python
+
+   ec.get_sites()
+
+   # Include region memberships as one column per region type
+   ec.get_sites(include_region=True)
+
 Regions
 ~~~~~~~
 
@@ -270,6 +283,8 @@ sample, including collection date, location, sample type, and parentage.
 ``get_sample_igsn()`` returns a DataFrame of sample names paired with their
 IGSN DOIs. ``view_sample_igsn()`` opens an interactive widget with an embedded
 iframe that loads the DOI landing page for any sample you select from a dropdown.
+Install with ``pip install "terndata.ecoplots[gui]"`` before using widget
+methods.
 
 .. automethod:: EcoPlots.get_sample_igsn
    :no-index:
@@ -331,6 +346,8 @@ Sample Image Viewer
 For samples that have photographs attached, ``view_sample_images()`` opens an
 interactive viewer. Each image may be available in multiple resolutions — the
 viewer lets you select the resolution you want to display.
+Install with ``pip install "terndata.ecoplots[gui]"`` before using widget
+methods.
 
 .. automethod:: EcoPlots.view_sample_images
    :no-index:
@@ -359,6 +376,8 @@ Spatial Filter Widget
 ---------------------
 
 Draw a polygon or rectangle on a map to restrict results to a geographic area.
+Install with ``pip install "terndata.ecoplots[gui]"`` before using widget
+methods.
 
 .. automethod:: EcoPlots.select_spatial
    :no-index:
@@ -383,6 +402,9 @@ Data Preview & Retrieval
 .. automethod:: EcoPlots.get_data
    :no-index:
 
+.. automethod:: EcoPlots.export_data
+   :no-index:
+
 **Typical workflow**
 
 .. code-block:: python
@@ -396,11 +418,30 @@ Data Preview & Retrieval
    # 3. Download the full dataset
    df  = ec.get_data(dformat="pd")   # pandas DataFrame
    gdf = ec.get_data()               # GeoDataFrame (default)
+   pq  = ec.get_data(dformat="pq")   # Parquet bytes
+
+   ec.export_data("outputs/samples.parquet")
+   ec.export_data("outputs/samples.csv")
 
 .. note::
 
    In ``samples`` mode ``get_data()`` does **not** support the
-   ``"geojson"`` / ``"json"`` formats. Use ``"pd"`` or ``"gpd"`` only.
+   ``"geojson"`` / ``"json"`` formats. Use ``"pd"``, ``"gpd"``, or ``"pq"``.
+
+**Async streaming**
+
+.. code-block:: python
+
+   from terndata.ecoplots import AsyncEcoPlots
+
+   ec = AsyncEcoPlots("samples")
+   ec.select(material_sample_type="Plant Voucher Specimen")
+
+   async for gdf in ec.get_data_stream(dformat="gpd"):
+       ...
+
+   async for parquet_bytes in ec.get_data_stream(dformat="pq"):
+       ...
 
 ----
 

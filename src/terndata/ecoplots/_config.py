@@ -9,9 +9,32 @@ import tempfile
 
 # Default configuration
 
-VERSION = "1.0.0"
+try:
+    from .version import __version__ as VERSION
+except Exception:  # pragma: no cover - defensive fallback for source checkouts
+    VERSION = "1.0.0"
 
-API_BASE_URL = "https://ecoplots.tern.org.au"
+PRODUCTION_API_BASE_URL = "https://ecoplots.tern.org.au"
+DEV_API_BASE_URL = "https://ecoplots-test.tern.org.au"
+API_BASE_URL_ENV_VAR = "TERNDATA_ECOPLOTS_API_BASE_URL"
+
+
+def _is_dev_version(version: str) -> bool:
+    """Return True for PEP 440 development versions."""
+    return ".dev" in version.lower()
+
+
+def _resolve_api_base_url(version: str = VERSION) -> str:
+    """Resolve the EcoPlots API base URL for the installed package."""
+    override = os.getenv(API_BASE_URL_ENV_VAR)
+    if override:
+        return override.rstrip("/")
+    if _is_dev_version(version):
+        return DEV_API_BASE_URL
+    return PRODUCTION_API_BASE_URL
+
+
+API_BASE_URL = _resolve_api_base_url()
 
 CACHE_EXPIRE_SECONDS = 60 * 60 * 24 * 14  # Default cache expiration time: 14 days
 CACHE_DIR = os.path.join(tempfile.gettempdir(), "ecoplots_labels_cache")

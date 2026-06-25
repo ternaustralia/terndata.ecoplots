@@ -6,10 +6,19 @@ A quick-reference guide for all supported workflows in both **observations** and
 
 ## Clients
 
+Install modules:
+
+```bash
+pip install terndata.ecoplots          # sync client, observations/samples, Parquet
+pip install "terndata.ecoplots[async]" # AsyncEcoPlots + async streaming transport
+pip install "terndata.ecoplots[gui]"   # Jupyter widgets
+```
+
 | | Sync | Async |
 |---|---|---|
 | **Class** | `EcoPlots` | `AsyncEcoPlots` |
 | **`get_data()`** | Blocking | `await`-able |
+| **`get_data_stream()`** | — | async iterator |
 | **Everything else** | Sync | Sync (inherited) |
 
 ```python
@@ -20,8 +29,8 @@ ec = EcoPlots()
 aec = AsyncEcoPlots()
 
 # Samples
-ec = EcoPlots(mode="samples")
-aec = AsyncEcoPlots(mode="samples")
+ec = EcoPlots("samples")
+aec = AsyncEcoPlots("samples")
 ```
 
 ---
@@ -114,6 +123,7 @@ Accepted formats (examples): `"21/05/2020"`, `"21-05-2020"`, `"21st May 2020"`, 
 ```python
 ec.get_datasources()            # available datasets
 ec.get_sites()                  # available sites
+ec.get_sites(include_region=True)  # sites with region columns
 ec.get_region_types()           # available region types
 ec.get_regions("States and Territories")   # regions for a type
 ec.get_feature_types()          # available feature types
@@ -125,6 +135,10 @@ ec.get_datasources_attributes()
 ec.get_sites_attributes()
 ec.get_site_visit_attributes()
 ec.get_observation_attributes()
+
+# Attribute data values from current filters
+ec.get_site_attributes_data()
+ec.get_site_visit_attributes_data()
 ```
 
 ### Preview & Summary
@@ -143,7 +157,11 @@ ec.preview(dformat="geojson")   # raw GeoJSON dict
 ```python
 gdf = ec.get_data()                          # GeoDataFrame (default)
 df  = ec.get_data(dformat="pandas")         # DataFrame
-gj  = ec.get_data(dformat="geojson")        # GeoJSON string
+pq  = ec.get_data(dformat="parquet")        # Parquet bytes
+gj  = ec.get_data(dformat="geojson")        # GeoJSON object
+ec.export_data("outputs/observations.parquet")  # retrieve and save directly
+ec.export_data("outputs/observations.csv")
+ec.export_data("outputs/observations.geojson")
 
 # Allow full download with no filters (use with caution)
 gdf = ec.get_data(allow_full_download=True)
@@ -151,6 +169,12 @@ gdf = ec.get_data(allow_full_download=True)
 # Async
 gdf = await aec.get_data()
 gdf = await aec.get_data(dformat="pandas")
+
+async for gdf_chunk in aec.get_data_stream(dformat="gpd"):
+    ...
+
+async for parquet_chunk in aec.get_data_stream(dformat="pq"):
+    ...
 ```
 
 ### Spatial Widget
@@ -224,10 +248,11 @@ The mandatory `TERN Ecosystem Surveillance` dataset is always set — it cannot 
 ### Discovery
 
 ```python
-ec = EcoPlots(mode="samples")
+ec = EcoPlots("samples")
 
 ec.get_datasources()             # always returns TERN Ecosystem Surveillance
 ec.get_sites()
+ec.get_sites(include_region=True)  # sample sites with region columns
 ec.get_region_types()
 ec.get_regions("IBRA7 Bioregions")
 ec.get_material_sample_types()   # 5 material sample types
@@ -251,9 +276,15 @@ ec.select(material_sample_type="Plant Voucher Specimen")
 
 gdf = ec.get_data()                     # GeoDataFrame
 df  = ec.get_data(dformat="pandas")    # DataFrame
+pq  = ec.get_data(dformat="pq")        # Parquet bytes
+ec.export_data("outputs/samples.parquet")
+ec.export_data("outputs/samples.csv")
 
 # Async
 gdf = await aec.get_data()
+
+async for gdf_chunk in aec.get_data_stream(dformat="gpd"):
+    ...
 ```
 
 ### IGSN Viewer
@@ -323,7 +354,7 @@ widget = ec.select_spatial()   # same as observations mode
 ```python
 from terndata.ecoplots import AsyncEcoPlots
 
-ec = AsyncEcoPlots(mode="samples")
+ec = AsyncEcoPlots("samples")
 
 # 1. Discover
 ec.get_material_sample_types()
@@ -383,6 +414,8 @@ ec2 = AsyncEcoPlots.load("plant_vouchers_qld.ecoproj")
 | `summary()` | ✓ | ✓ | |
 | `preview()` | ✓ | ✓ | Samples: no `geojson`/`json` format |
 | `get_data()` | ✓ | ✓ | Async in `AsyncEcoPlots` |
+| `export_data()` | ✓ | ✓ | Fetches and saves `.parquet`, `.csv`, `.geojson`, `.gpkg`, `.shp`, `.fgb` |
+| `get_data_stream()` | ✓ | ✓ | Async only; `gpd`, `pq`, `geojson` for observations; `gpd`, `pq` for samples |
 | `get_datasources()` | ✓ | ✓ | |
 | `get_sites()` | ✓ | ✓ | |
 | `get_region_types()` | ✓ | ✓ | |
@@ -394,6 +427,8 @@ ec2 = AsyncEcoPlots.load("plant_vouchers_qld.ecoproj")
 | `get_datasources_attributes()` | ✓ | — | |
 | `get_sites_attributes()` | ✓ | — | |
 | `get_site_visit_attributes()` | ✓ | — | |
+| `get_site_attributes_data()` | ✓ | ✓ | CSV endpoint as DataFrame |
+| `get_site_visit_attributes_data()` | ✓ | ✓ | CSV endpoint as DataFrame |
 | `get_material_sample_types()` | — | ✓ | |
 | `get_sample_igsn()` | — | ✓ | Requires Plant Voucher Specimen |
 | `view_sample_igsn()` | — | ✓ | Requires Plant Voucher Specimen |

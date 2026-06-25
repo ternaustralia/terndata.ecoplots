@@ -20,7 +20,8 @@ for analysis.
    All methods on this page are available on both
    :class:`~terndata.ecoplots.ecoplots.EcoPlots` (synchronous) and
    :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` (asynchronous).
-   For ``AsyncEcoPlots``, use ``df = await ec.get_data()`` in the final step.
+   For ``AsyncEcoPlots``, use ``df = await ec.get_data()`` in the final step,
+   or ``async for chunk in ec.get_data_stream(...)`` for streaming workflows.
 
 .. note::
 
@@ -40,6 +41,9 @@ Creating the Client
 
    # No arguments needed — all filters start empty
    ec = EcoPlots()
+
+   # Mode names are validated and resolved case-insensitively
+   ec = EcoPlots("observations")
 
    # Or pre-load a saved project
    ec = EcoPlots.load("my_project.ecoproj")
@@ -110,6 +114,20 @@ Use these methods to explore what data is available *before* downloading. They
 all return :class:`pandas.DataFrame` and respect your current filters, so you
 can narrow results step by step.
 
+Unified Discovery
+~~~~~~~~~~~~~~~~~
+
+.. automethod:: EcoPlots.discover
+   :no-index:
+
+**Example**
+
+.. code-block:: python
+
+   ec.discover("dataset")
+   ec.discover("site_id", include_region=True)
+   ec.discover("site_attributes_data")
+
 Datasets
 ~~~~~~~~
 
@@ -134,7 +152,13 @@ Sites
 .. automethod:: EcoPlots.get_sites_attributes
    :no-index:
 
+.. automethod:: EcoPlots.get_site_attributes_data
+   :no-index:
+
 .. automethod:: EcoPlots.get_site_visit_attributes
+   :no-index:
+
+.. automethod:: EcoPlots.get_site_visit_attributes_data
    :no-index:
 
 **Example**
@@ -142,6 +166,9 @@ Sites
 .. code-block:: python
 
    ec.get_sites()
+   ec.get_sites(include_region=True)
+   ec.get_site_attributes_data()
+   ec.get_site_visit_attributes_data()
 
 Regions
 ~~~~~~~
@@ -230,6 +257,8 @@ Spatial Filter Widget
 ---------------------
 
 Draw a polygon or rectangle directly on a map to spatially restrict your query.
+Install with ``pip install "terndata.ecoplots[gui]"`` before using widget
+methods.
 
 .. automethod:: EcoPlots.select_spatial
    :no-index:
@@ -263,6 +292,9 @@ Data Preview & Retrieval
 .. automethod:: EcoPlots.get_data
    :no-index:
 
+.. automethod:: EcoPlots.export_data
+   :no-index:
+
 **Typical workflow**
 
 .. code-block:: python
@@ -278,6 +310,32 @@ Data Preview & Retrieval
 
    # 4. Or as a plain pandas DataFrame
    df = ec.get_data(dformat="pd")
+
+   # 5. Or as Parquet bytes
+   parquet_bytes = ec.get_data(dformat="pq")
+
+   # 6. Observations can also be returned as GeoJSON
+   geojson = ec.get_data(dformat="geojson")
+
+   # 7. Or retrieve and save directly
+   ec.export_data("outputs/ecoplots.parquet")
+   ec.export_data("outputs/ecoplots.csv")
+   ec.export_data("outputs/ecoplots.geojson")
+
+**Async streaming**
+
+.. code-block:: python
+
+   from terndata.ecoplots import AsyncEcoPlots
+
+   ec = AsyncEcoPlots()
+   ec.select(site_id="TCFTNS0002")
+
+   async for gdf_chunk in ec.get_data_stream(dformat="gpd"):
+       ...
+
+   async for parquet_chunk in ec.get_data_stream(dformat="pq"):
+       ...
 
 ----
 

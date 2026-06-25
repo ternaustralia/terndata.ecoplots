@@ -14,7 +14,6 @@ from typing import (
     Union,
 )
 
-import aiohttp
 import orjson
 import requests
 from rapidfuzz import fuzz, process
@@ -40,6 +39,14 @@ from ._utils import _ensure_ecoproj_path, _parse_date, _validate_spatial_input
 
 SelfType = TypeVar("SelfType", bound="EcoPlotsBase")
 PROJECT_FILE_VERSION = 1
+ALLOWED_MODES = ("observations", "samples")
+MODE_ALIASES = {
+    "observation": "observations",
+    "observations": "observations",
+    "obs": "observations",
+    "sample": "samples",
+    "samples": "samples",
+}
 
 
 class EcoPlotsBase:
@@ -75,7 +82,7 @@ class EcoPlotsBase:
             mode: Operational mode, either "observations" (default) or "samples".
         """
         self._base_url = API_BASE_URL
-        self._mode = mode
+        self._mode = self._resolve_mode(mode)
         self._filters = filterset or {}
         self._query_filters = query_filters or {}
         # In samples mode we enforce a persistent dataset selection which
@@ -96,6 +103,42 @@ class EcoPlotsBase:
             else:
                 if persistent_uri not in self._query_filters["dataset"]:
                     self._query_filters["dataset"].insert(0, persistent_uri)
+
+        self._display_init_message()
+
+    @staticmethod
+    def _resolve_mode(mode: str) -> str:
+        """Return a canonical mode or raise for unknown modes."""
+        if not isinstance(mode, str):
+            raise EcoPlotsError("Invalid mode. Allowed modes are: " + ", ".join(ALLOWED_MODES))
+
+        normalized = mode.strip().lower().replace("-", " ").replace("_", " ")
+        if normalized.endswith(" mode"):
+            normalized = normalized[: -len(" mode")].strip()
+        normalized = normalized.replace(" ", "_")
+
+        alias = MODE_ALIASES.get(normalized)
+        if alias:
+            return alias
+
+        match = process.extractOne(normalized, ALLOWED_MODES, scorer=fuzz.WRatio)
+        if match and match[1] >= 80:
+            return match[0]
+
+        suggestion = f" Did you mean '{match[0]}'?" if match and match[1] >= 70 else ""
+        raise EcoPlotsError(
+            f"Invalid mode {mode!r}.{suggestion} Allowed modes are: " + ", ".join(ALLOWED_MODES)
+        )
+
+    def _display_init_message(self) -> None:
+        """Print a concise mode-specific initialization message."""
+        if self._mode == "samples":
+            print(  # noqa: T201
+                f"{self.__class__.__name__} initialized in samples mode. "
+                "The TERN Ecosystem Surveillance dataset filter is applied automatically."
+            )
+        else:
+            print(f"{self.__class__.__name__} initialized in observations mode.")  # noqa: T201
 
     @staticmethod
     def _display_warning(message: str) -> None:
@@ -888,12 +931,18 @@ class EcoPlotsBase:
         self,
         discovery_facet: str,
         region_type: Optional[str] = None,
+        include_region: bool = False,
+        query_filters: Optional[dict] = None,
     ) -> dict:
         """Resolve and call the discovery endpoint for a facet.
 
         Args:
             discovery_facet: Facet to discover (must resolve via configured discovery facets).
             region_type: Optional region type used when discovering regions.
+            include_region: If True while discovering sites, request site region
+                metadata from the API using ``include-regions=True``.
+            query_filters: Optional query filters to use for this request instead
+                of the instance's current query filters.
 
         Returns:
             Parsed JSON payload returned by the discovery endpoint.
@@ -911,15 +960,24 @@ class EcoPlotsBase:
         if not facet_param:
             raise EcoPlotsError(f"Invalid discovery facet: {discovery_facet}")
 
+        params = []
         if facet_param == "region" and region_type:
             region_type_val = resolve_region_type(region_type)
-            url = f"{self._base_url}/api/v1.0/discovery/{facet_param}?region_type={region_type_val}"
-        else:
-            url = f"{self._base_url}/api/v1.0/discovery/{facet_param}"
+            params.append(("region_type", region_type_val))
+        if facet_param == "site_id" and include_region:
+            params.append(("include-regions", "True"))
 
-        payload = {"query": copy.deepcopy(self._query_filters)}
+        url = f"{self._base_url}/api/v1.0/discovery/{facet_param}"
 
-        resp = requests.post(url, json=payload, timeout=60)
+        payload = {
+            "query": (
+                copy.deepcopy(query_filters)
+                if query_filters is not None
+                else copy.deepcopy(self._query_filters)
+            )
+        }
+
+        resp = requests.post(url, params=params if params else None, json=payload, timeout=60)
         resp.raise_for_status()
         return orjson.loads(resp.content)
 
@@ -1269,6 +1327,240 @@ class EcoPlotsBase:
             - Socket read timeout matches total timeout; connection timeout is 30s.
             - Intended for internal use only.
         """
+        if dformat == "parquet":
+            raise EcoPlotsError(
+                "Parquet is available via get_data(dformat='parquet'), not fetch_data()."
+            )
+        if dformat not in ("geojson", "csv"):
+            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
+
+        line_iter = self.iter_fetch_data_lines(
+            page_number=page_number,
+            page_size=page_size,
+            dformat=dformat,
+            **extras,
+        )
+        if dformat == "csv":
+            buffer = bytearray()
+            async for line in line_iter:
+                if buffer:
+                    buffer.extend(b"\n")
+                buffer.extend(line.encode("utf-8"))
+            return bytes(buffer)
+
+        buffer = bytearray()
+        async for line in line_iter:
+            buffer.extend(line.encode("utf-8"))
+        return orjson.loads(buffer)
+
+    def fetch_data_sync(
+        self,
+        page_number: Optional[int] = None,
+        page_size: Optional[int] = None,
+        dformat: str = "geojson",
+        **extras,
+    ) -> dict:
+        """Synchronously fetch data for the current query, optionally paginated."""
+        if dformat == "parquet":
+            raise EcoPlotsError(
+                "Parquet is available via get_data(dformat='parquet'), not fetch_data_sync()."
+            )
+        if dformat not in ("geojson", "csv"):
+            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
+
+        line_iter = self.iter_fetch_data_lines_sync(
+            page_number=page_number,
+            page_size=page_size,
+            dformat=dformat,
+            **extras,
+        )
+        if dformat == "csv":
+            buffer = bytearray()
+            for line in line_iter:
+                if buffer:
+                    buffer.extend(b"\n")
+                buffer.extend(line.encode("utf-8"))
+            return bytes(buffer)
+
+        buffer = bytearray()
+        for line in line_iter:
+            buffer.extend(line.encode("utf-8"))
+        return orjson.loads(buffer)
+
+    def iter_fetch_data_lines_sync(
+        self,
+        page_number: Optional[int] = None,
+        page_size: Optional[int] = None,
+        dformat: str = "geojson",
+        **extras,
+    ):
+        """Synchronously yield decoded data-stream lines for the current query."""
+        if dformat not in ("geojson", "csv"):
+            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
+
+        payload = {
+            "query": copy.deepcopy(self._query_filters),
+            "page_number": page_number,
+            "page_size": page_size,
+        }
+
+        if extras and isinstance(payload["query"], dict):
+            payload["query"].update(extras)
+
+        if page_number and page_size:
+            payload.update({"page_number": page_number, "page_size": page_size})
+            timeout = 300
+        else:
+            del payload["page_number"]
+            del payload["page_size"]
+            timeout = 3000
+
+        with requests.post(
+            f"{self._base_url}/api/v1.0/data/stream",
+            params=[("dformat", dformat)],
+            json=payload,
+            timeout=timeout,
+            headers={"Accept": "text/event-stream"},
+            stream=True,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines(decode_unicode=True):
+                if line:
+                    line = line.strip()
+                    if line:
+                        yield line
+
+    def fetch_samples_data_sync(self):
+        """Synchronously fetch sample data from the samples endpoint."""
+        try:
+            import geopandas
+        except ImportError:
+            raise EcoPlotsError(
+                "geopandas is required for fetch_samples_data_sync(). "
+                "Install it with: pip install geopandas"
+            )
+
+        if "material_sample_type" not in self._query_filters:
+            self._display_warning(
+                "material_sample_type must be selected to fetch samples data. "
+                "Please select a material_sample_type using select()."
+            )
+            return geopandas.GeoDataFrame()
+
+        material_sample_types = self._query_filters.get("material_sample_type", [])
+        if len(material_sample_types) != 1:
+            raise EcoPlotsError(
+                f"Exactly one material_sample_type must be selected, "
+                f"got {len(material_sample_types)}"
+            )
+
+        payload = {"query": copy.deepcopy(self._query_filters), "context": "samples"}
+        has_image = bool(payload["query"].pop("has_image", False))
+        if has_image:
+            payload["has_image"] = True
+
+        try:
+            resp = requests.post(
+                f"{self._base_url}/api/v1.0/ui/data/samples",
+                json=payload,
+                timeout=300,
+            )
+            resp.raise_for_status()
+            data = orjson.loads(resp.content)
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if has_image and status_code and status_code >= 500:
+                self._display_warning(
+                    "Server rejected 'has_image=true'. Retrying without has_image "
+                    "and filtering image rows client-side."
+                )
+                fallback_payload = {
+                    "query": copy.deepcopy(self._query_filters),
+                    "context": "samples",
+                }
+                resp = requests.post(
+                    f"{self._base_url}/api/v1.0/ui/data/samples",
+                    json=fallback_payload,
+                    timeout=300,
+                )
+                resp.raise_for_status()
+                data = orjson.loads(resp.content)
+            else:
+                raise
+
+        hits = data.get("hits", {}).get("hits", [])
+
+        if has_image:
+
+            def _has_sample_images(value):
+                if not isinstance(value, list):
+                    return False
+                for item in value:
+                    if isinstance(item, str) and item.strip():
+                        return True
+                    if isinstance(item, dict):
+                        for url in item.values():
+                            if isinstance(url, str) and url.strip():
+                                return True
+                return False
+
+            hits = [
+                hit
+                for hit in hits
+                if _has_sample_images((hit.get("_source", {}) or {}).get("sample_images"))
+            ]
+
+        if not hits:
+            self._display_warning("No sample data found for the current filters.")
+            return geopandas.GeoDataFrame()
+
+        records = []
+        for hit in hits:
+            source = hit.get("_source", {})
+            if not isinstance(source, dict):
+                continue
+            cleaned = {}
+            for key, value in source.items():
+                if key in {"geopoint", "tags"} or key.startswith("region"):
+                    continue
+                if value is not None:
+                    cleaned[key] = value
+            records.append(cleaned)
+
+        gdf = geopandas.GeoDataFrame(records)
+        if not gdf.empty:
+            gdf = gdf.dropna(axis=1, how="all")
+        return gdf
+
+    async def iter_fetch_data_lines(
+        self,
+        page_number: Optional[int] = None,
+        page_size: Optional[int] = None,
+        dformat: str = "geojson",
+        **extras,
+    ):
+        """Yield decoded data-stream lines for the current query.
+
+        Args:
+            page_number: Page index to request. Must be provided together with ``page_size``.
+            page_size: Number of items per page. Must be provided together with ``page_number``.
+            dformat: Stream format, either ``"geojson"`` or ``"csv"``.
+            **extras: Additional query filters to merge into the current query.
+
+        Yields:
+            Non-empty decoded response lines with surrounding whitespace removed.
+
+        Raises:
+            EcoPlotsError: If an invalid dformat is provided.
+        """
+        try:
+            import aiohttp
+        except ImportError as exc:
+            raise EcoPlotsError(
+                "Data streaming requires aiohttp. Install it with: "
+                "pip install terndata.ecoplots[async]"
+            ) from exc
+
         if dformat not in ("geojson", "csv"):
             raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
 
@@ -1298,18 +1590,10 @@ class EcoPlotsBase:
             ) as resp:
                 resp.raise_for_status()
 
-                chunks = []
                 async for line in resp.content:
                     line = line.decode("utf-8").strip()
                     if line:
-                        chunks.append(line)
-                # Combine all chunks into final response
-                if dformat == "csv":
-                    return "\n".join(chunks).encode("utf-8")
-                else:
-                    # For GeoJSON, parse the complete JSON response
-                    complete_data = "".join(chunks)
-                    return orjson.loads(complete_data)
+                        yield line
 
     async def fetch_samples_data(self):
         """Fetch sample data from the samples endpoint.
@@ -1329,6 +1613,14 @@ class EcoPlotsBase:
             - material_sample_type is required and must be single-valued
             - Intended for internal use only
         """
+        try:
+            import aiohttp
+        except ImportError as exc:
+            raise EcoPlotsError(
+                "Sample data retrieval requires aiohttp. Install it with: "
+                "pip install terndata.ecoplots[async]"
+            ) from exc
+
         try:
             import geopandas
         except ImportError:
@@ -1605,6 +1897,40 @@ class EcoPlotsBase:
         resp = requests.post(url, params=params, json=payload, timeout=30)
         resp.raise_for_status()
         return orjson.loads(resp.content)
+
+    def fetch_attributes_data(self, attribute_type: str) -> bytes:
+        """Fetch site or site-visit attribute data as CSV bytes.
+
+        Args:
+            attribute_type: Attribute data entity to fetch. Supported values are
+                ``"site"`` and ``"site_visit"``/``"site-visit"``.
+
+        Returns:
+            Raw CSV bytes returned by the API.
+
+        Raises:
+            EcoPlotsError: If an unsupported attribute type is requested.
+        """
+        attribute_paths = {
+            "site": "site",
+            "site_visit": "site-visit",
+            "site-visit": "site-visit",
+        }
+        endpoint_attribute = attribute_paths.get(attribute_type)
+        if not endpoint_attribute:
+            raise EcoPlotsError(
+                "Invalid attribute data type. Allowed values are: site, site_visit."
+            )
+
+        payload = {"query": copy.deepcopy(self._query_filters)}
+        resp = requests.post(
+            f"{self._base_url}/api/v1.0/data/attributes/{endpoint_attribute}",
+            params=[("dformat", "csv")],
+            json=payload,
+            timeout=300,
+        )
+        resp.raise_for_status()
+        return resp.content
 
     def summarise_data(self, query_filters: Optional[dict] = None) -> dict:
         """Request a lightweight summary for the given or current query filters.
