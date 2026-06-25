@@ -65,9 +65,12 @@ Key capabilities:
 
 - Human-friendly, validated filters with fuzzy name resolution
 - Preview results page-by-page before committing to a full download
-- Interactive widgets: spatial selector, IGSN viewer, sample image viewer
-- Two runtimes: :class:`~terndata.ecoplots.ecoplots.EcoPlots` (sync) and
-  :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots` (async)
+- Standard install includes observations and samples workflows, Parquet output,
+  site/site-visit attribute data, and the synchronous
+  :class:`~terndata.ecoplots.ecoplots.EcoPlots` client
+- Optional async runtime: :class:`~terndata.ecoplots.ecoplots.AsyncEcoPlots`
+  with async ``get_data()`` and ``get_data_stream()``
+- Optional GUI widgets: spatial selector, IGSN viewer, sample image viewer
 - Save and reload your filter selection via ``.ecoproj`` project files
 
 Installation
@@ -77,30 +80,16 @@ Installation
 
    pip install terndata.ecoplots
 
-Supported Python: 3.10+
+The standard install includes the synchronous client, both data modes, discovery
+and filtering, data retrieval, site/site-visit attribute data retrieval, and
+Parquet output.
 
-Quick start
-===========
+Optional modules:
 
-**Observations**
+.. code-block:: bash
 
-.. code-block:: python
-
-   from terndata.ecoplots import EcoPlots
-
-   ec = EcoPlots()                          # mode="observations" by default
-   ec.select(dataset="TERN Surveillance")
-   gdf = ec.get_data()
-
-**Samples**
-
-.. code-block:: python
-
-   from terndata.ecoplots import EcoPlots
-
-   ec = EcoPlots(mode="samples")
-   ec.select(material_sample_type="Plant Voucher Specimen", has_images=True)
-   df = ec.get_data(dformat="pd")
+   pip install "terndata.ecoplots[async]"  # AsyncEcoPlots + streaming transport
+   pip install "terndata.ecoplots[gui]"    # notebook widgets
 
 Supported Python: 3.10+
 
@@ -113,9 +102,11 @@ Quick start
 
    from terndata.ecoplots import EcoPlots
 
-   ec = EcoPlots()                          # mode="observations" by default
+   ec = EcoPlots()                          # observations mode by default
    ec.select(dataset="TERN Surveillance")
-   gdf = ec.get_data()
+   gdf = ec.get_data()                      # GeoDataFrame
+   parquet_bytes = ec.get_data(dformat="pq")
+   site_attrs = ec.get_site_attributes_data()
 
 **Samples**
 
@@ -123,9 +114,25 @@ Quick start
 
    from terndata.ecoplots import EcoPlots
 
-   ec = EcoPlots(mode="samples")
-   ec.select(material_sample_type="Plant Voucher Specimen", has_images=True)
+   ec = EcoPlots("samples")
+   ec.select(material_sample_type="Plant Voucher Specimen", has_image=True)
    df = ec.get_data(dformat="pd")
+   sites = ec.get_sites(include_region=True)
+
+**Async streaming**
+
+.. code-block:: python
+
+   from terndata.ecoplots import AsyncEcoPlots
+
+   ec = AsyncEcoPlots()
+   ec.select(site_id="TCFTNS0002")
+
+   async for chunk in ec.get_data_stream(dformat="gpd"):
+       ...
+
+Install with ``pip install "terndata.ecoplots[async]"`` before using async
+transport methods.
 
 Next steps
 ==========
@@ -149,7 +156,7 @@ Next steps
    :hidden:
    :maxdepth: 1
 
-  workflows
+   workflows
    api/ecoplots_observations
    api/ecoplots_samples
    internals

@@ -7,8 +7,15 @@ Overview
 ``AsyncEcoPlots`` is the asynchronous client. It is useful when you already run
 async code (for example in services/apps) and want non-blocking data download.
 
+Install with:
+
+.. code-block:: bash
+
+   pip install "terndata.ecoplots[async]"
+
 In practice, most methods are used the same way as the synchronous client.
-The key difference is that you use ``await`` for ``get_data()``.
+The key difference is that you use ``await`` for ``get_data()`` and can use
+``get_data_stream()`` to consume GeoDataFrame or Parquet chunks as they arrive.
 
 Constructor Parameters
 ----------------------
@@ -17,7 +24,7 @@ Signature:
 
 .. code-block:: python
 
-   AsyncEcoPlots(filterset=None, query_filters=None, mode="observations")
+   AsyncEcoPlots(mode="observations", filterset=None, query_filters=None)
 
 What each parameter means:
 
@@ -39,7 +46,8 @@ What each parameter means:
      - No. Keep this internal.
    * - ``mode``
      - ``str``
-     - ``"observations"`` (default) or ``"samples"``.
+     - ``"observations"`` (default) or ``"samples"``. Case and close
+       spellings are resolved automatically.
      - Yes, only when you intentionally need samples workflows.
 
 Internal Variables: Do Not Edit Manually
@@ -60,6 +68,7 @@ Async Usage Note
 
 - ``EcoPlots``: ``df = ec.get_data()``
 - ``AsyncEcoPlots``: ``df = await ec.get_data()``
+- ``AsyncEcoPlots`` streaming: ``async for chunk in ec.get_data_stream(dformat="gpd"): ...``
 
 .. autoclass:: terndata.ecoplots.ecoplots.AsyncEcoPlots
    :members:
@@ -92,5 +101,3 @@ The ``AsyncEcoPlots`` class inherits all magic methods from ``EcoPlotsBase`` for
 **Copying:**
   - ``__copy__()`` - Shallow copy support (``copy.copy(ecoplots)``)
   - ``__deepcopy__(memo)`` - Deep copy support (``copy.deepcopy(ecoplots)``)
-
-

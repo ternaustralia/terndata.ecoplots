@@ -9,12 +9,38 @@ The package is designed so you can:
 
 - Start with simple filters (for example site, dataset, region)
 - Preview results before full download
-- Retrieve data as ``pandas``/``geopandas`` tables for analysis
+- Retrieve data as ``pandas``/``geopandas`` tables, GeoJSON (observations), or
+  Parquet bytes
+- Retrieve site and site-visit attribute data from the current filters
 - Save your current setup and reuse it later
 
 If you are new to Python, the most important thing to know is:
 you usually only need to set filters with methods like ``select()``.
 Most internal variables are managed by the library.
+
+Install Modules
+---------------
+
+``terndata.ecoplots`` is split into a standard install plus optional extras.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 35 45
+
+   * - Install
+     - Includes
+     - Typical use
+   * - ``pip install terndata.ecoplots``
+     - ``EcoPlots`` sync client, observations and samples modes, discovery,
+       filtering, data/attribute retrieval, Parquet output.
+     - Notebooks, scripts, analysis workflows.
+   * - ``pip install "terndata.ecoplots[async]"``
+     - Adds async HTTP transport for ``AsyncEcoPlots.get_data()`` and
+       ``AsyncEcoPlots.get_data_stream()``.
+     - ASGI apps, services, non-blocking/concurrent downloads.
+   * - ``pip install "terndata.ecoplots[gui]"``
+     - Adds ``ipyleaflet`` and ``ipywidgets`` for notebook widgets.
+     - Spatial drawing, IGSN viewer, and sample image viewer in Jupyter.
 
 Client Types: Sync vs Async
 ---------------------------
@@ -37,7 +63,7 @@ how ``get_data()`` is called.
    * - ``AsyncEcoPlots``
      - Larger fetches, apps/services, advanced users
      - You are already using async code and want non-blocking downloads.
-     - ``df = await ec.get_data()``
+     - ``df = await ec.get_data()`` or ``async for chunk in ec.get_data_stream(...)``
 
 Important:
 
@@ -51,8 +77,8 @@ Both classes share the same constructor:
 
 .. code-block:: python
 
-    EcoPlots(filterset=None, query_filters=None, mode="observations")
-    AsyncEcoPlots(filterset=None, query_filters=None, mode="observations")
+    EcoPlots(mode="observations", filterset=None, query_filters=None)
+    AsyncEcoPlots(mode="observations", filterset=None, query_filters=None)
 
 Parameter guide
 ~~~~~~~~~~~~~~~
@@ -75,7 +101,8 @@ Parameter guide
      - No. This is internal state and should usually not be edited.
    * - ``mode``
      - ``str``
-     - Data domain: ``"observations"`` (default) or ``"samples"``.
+     - Data domain: ``"observations"`` (default) or ``"samples"``. Case and
+       close spellings are resolved automatically.
      - Yes, if you intentionally want samples workflows.
 
 What ``mode`` changes
@@ -126,6 +153,12 @@ Beginner-Friendly Example
 
     # Fetch full data
     data_gdf = ec.get_data()
+
+    # Fetch Parquet bytes
+    parquet_bytes = ec.get_data(dformat="pq")
+
+    # Fetch site attribute data for the same filters
+    site_attributes = ec.get_site_attributes_data()
 
 Magic Methods & Pythonic API
 -----------------------------
