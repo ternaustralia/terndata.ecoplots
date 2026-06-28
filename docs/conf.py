@@ -11,11 +11,23 @@ if str(SRC) not in sys.path:
 project = "terndata.ecoplots"
 author = "Avinash Chandra"
 
+
+def _read_package_version() -> str:
+    """Read the setuptools-scm generated version without importing the package."""
+    version_file = SRC / "terndata" / "ecoplots" / "version.py"
+    namespace: dict[str, str] = {}
+    if version_file.exists():
+        exec(version_file.read_text(encoding="utf-8"), namespace)
+    return namespace.get("__version__", "0.0.0")
+
+
 START_YEAR = 2025
 YEAR = datetime.now(timezone.utc).year
 years = f"{START_YEAR}-{YEAR}" if YEAR > START_YEAR else f"{YEAR}"
 copyright = f"{years}, TDSA (TERN Data Services and Analytics)"  # noqa: A001
-release = "1.0.0"
+release = _read_package_version()
+version = release.split("+", 1)[0]
+html_title = f"{project} {release}"
 
 extensions = [
     "sphinx.ext.autodoc",

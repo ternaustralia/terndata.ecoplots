@@ -66,6 +66,13 @@
 .eco-badge:hover { background: var(--color-background-secondary); }
 .eco-badge img { height: 16px; width: auto; }
 
+.eco-version-line {
+  margin-top: -1rem;
+  margin-bottom: 2rem;
+  color: var(--color-foreground-secondary);
+  font-size: .95rem;
+}
+
 /* Light/dark logo swap */
 .only-dark  { display: none; }
 [data-theme="dark"] .only-light { display: none; }
