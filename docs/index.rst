@@ -34,6 +34,10 @@
      </div>
    </div>
 
+.. rst-class:: eco-version-line
+
+**Documentation version:** |release|
+
 About EcoPlots
 ==============
 TERN EcoPlots is a platform designed for searching, discovering, and accessing ecological observations—both from systematic site-based surveys and opportunistic surveys—as well as specimen samples collected during field surveys from various data sources. With TERN EcoPlots, users can search for observation data and specimen samples from systematic surveys across Australia. The platform allows users to integrate data from multiple sources and access it as a comprehensive, ready-to-use data package. Additionally, users can search for specimen samples and request access to these samples for further research.

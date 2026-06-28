@@ -57,6 +57,15 @@ def test_repository_declares_citation_metadata():
     assert "terndata.ecoplots" in text
 
 
+def test_docs_conf_reads_generated_package_version():
+    docs_conf = Path(__file__).resolve().parents[1] / "docs" / "conf.py"
+    text = docs_conf.read_text(encoding="utf-8")
+
+    assert 'release = "1.0.0"' not in text
+    assert "release = _read_package_version()" in text
+    assert "html_title = f\"{project} {release}\"" in text
+
+
 def test_release_versions_use_production_api(monkeypatch):
     monkeypatch.delenv(API_BASE_URL_ENV_VAR, raising=False)
 
