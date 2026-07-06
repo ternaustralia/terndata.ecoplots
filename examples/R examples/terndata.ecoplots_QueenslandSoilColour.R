@@ -1,3 +1,7 @@
+## Accessing terndata.ecoplots from within R using reticulate
+##   - Select and download soil colour from the QBEIS dataset 
+##   - Plot site coordinates and soil colours
+
 ## load libraries
 
     ## to run python from within R studio
