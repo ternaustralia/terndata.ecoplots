@@ -1,6 +1,10 @@
-## Accessing terndata.ecoplots from within R using reticulate
+####################################################################################################
+##
+## Example: Accessing terndata.ecoplots from within R using reticulate
 ##   - Select and download soil colour from the QBEIS dataset 
 ##   - Plot site coordinates and soil colours
+##
+####################################################################################################
 
 ## load libraries
 

@@ -1,87 +1,119 @@
+# 🌿 Accessing `terndata.ecoplots` in R with `reticulate`
+
+Seamlessly access, query, and download TERN ecosystem data directly within your R workflow.
+
 ------------------------------------------------------------------------
 
-# Accessing `terndata.ecoplots` in R via the `reticulate` package
+## ✨ Overview
+
+The Python integration provided by the `reticulate` package enables R users to access the full functionality of `terndata.ecoplots`.
+
+Using `reticulate`, you can:
+
+- 🔍 Search and filter TERN datasets
+- 🌏 Select regions and sampling criteria
+- ⬇️ Download data directly into R
+
+For more information on `reticulate`, see the official documentation:
+
+🔗 <https://rstudio.github.io/reticulate/>
 
 ------------------------------------------------------------------------
 
-## Overview
+## 🚀 Example
 
-With Python integration via the [reticulate](https://rstudio.github.io/reticulate/ "https://rstudio.github.io/reticulate/") R package, the terndata.ecoplots package can be used from within R Studio to download data directly into R’s working environment.
+The example below downloads all **Plant Tissue Sample** records from the **TERN Ecosystem Surveillance** dataset for the **Northern Territory**.
 
-## Quick start
-
-The following example downloads all plant tissue sample data from the TERN Ecosystem Surveillance dataset for the Northern Territory.
+### Step 1 — Load required packages
 
 ``` r
-## Step 1: load libraries     
-library(reticulate)     
-py_require("terndata.ecoplots")  
+library(reticulate)
 
-## Step 2: select and download data from terndata.ecoplots     
-py_run_string(" 
-
-## load package 
-from terndata.ecoplots import EcoPlots  
-
-## load sample data into ec 
-ec = EcoPlots(mode='samples') 
-
-## select dataset, region_type, region and material_sample_type 
-ec.select(dataset='TERN Ecosystem Surveillance',
-          region_type='States and Territories',
-          region='Northern Territory',
-          material_sample_type='Plant Tissue Sample')
-
-## download data as pandas dataframe 
-nt_sample_data_py = ec.get_data(dformat='pandas')                
-")  
-
-## Step 3: load data into R environment      
-## objects from the Python environment can be accessed via "py$"     
-
-nt_sample_data = py$nt_sample_data_py     
-## if necessary: R-ify NAs (see additional information below)     
-nt_sample_data[nt_sample_data == "N/A"] = NA`]
+py_require("terndata.ecoplots")
 ```
 
-## Additional information
-
-1.  [Running Python from the console]{.underline}: In the script above, the Python code is executed by the reticulate::py_run_string() function. Alternatively, a Python console can be opened in R studio with reticulate::repl_python() which allows for interactive data exploration with terndata.ecoplots. Note, that R Studio does not display the head of the dataframe as intended by the preview() function of terndata.ecoplots, however, the column names can be accessed without downloading the dataset by ec.preview().columns.
-
-2.  [Python to R NA translation]{.underline}: NAs are not automatically translated when loading pandas dataframes into R. R will translate pandas NAs as “N/A” strings - if the pandas dataframe contains NAs, they need to be replaced by R’s native NA notation (see line 24).
-
-3.  [Wide data format]{.underline}: Generally, terndata.ecoplots provides data in wide format. Most visualisation or statistical analysis in R require long format, depending on the data and intended use, reformating might be necessary.
-
-`reticulate` enables the execution of Python code from within the R environment.
-
-After installing the `reticulate` package
+### Step 2 — Query and download data using `terndata.ecoplots`
 
 ``` r
-install.pacakges("reticulate")
-```
+py_run_string("
 
-the `terndata.ecoplots` package can be installed
-
-``` r
- py_require("terndata.ecoplots")
-```
-
-and the terndata.ecoplots package can be accessed via
-
-``` r
-## download sample data
-    py_run_string("
+# Load package
 from terndata.ecoplots import EcoPlots
 
-## load data 
-ec = EcoPlots()
+# Create EcoPlots object
+ec = EcoPlots(mode='samples')
 
-## select dataset and feature type
-ec.select(dataset='QBEIS',
-          feature_type='soil')
+# Select dataset and filters
+ec.select(
+    dataset='TERN Ecosystem Surveillance',
+    region_type='States and Territories',
+    region='Northern Territory',
+    material_sample_type='Plant Tissue Sample'
+)
 
-## download data and ensure correct type for conversion to R data frame
-soil_data = ec.get_data(dformat='pandas')
-soil_data = soil_data.astype(object)
-               ")
+# Download data as pandas DataFrame
+nt_sample_data_py = ec.get_data(dformat='pandas')
+
+# Convert all columns to object type
+nt_sample_data_py = nt_sample_data_py.astype(object)
+
+")
 ```
+
+### Step 3 — Import data into the R environment
+
+``` r
+nt_sample_data <- py$nt_sample_data_py
+```
+
+------------------------------------------------------------------------
+
+## ⚠️ Important Notes
+
+### 🐍 Running Python from R
+
+The example above executes Python code using:
+
+``` r
+reticulate::py_run_string()
+```
+
+For interactive exploration, you can launch a Python REPL directly from RStudio:
+
+``` r
+reticulate::repl_python()
+```
+
+This allows you to interact with `terndata.ecoplots` as if you were working in a native Python environment.
+
+#### 🔍 Previewing data
+
+RStudio does not fully render the dataframe preview generated by the `preview()` method.
+
+Instead, inspect available columns using:
+
+``` python
+ec.preview().columns
+```
+
+This allows dataset exploration before downloading data.
+
+------------------------------------------------------------------------
+
+### 📝 Missing Values (NA Handling)
+
+When pandas DataFrames are transferred from Python to R, missing values are not always translated automatically.
+
+As a result, missing values may appear as the literal string:
+
+``` r
+"N/A"
+```
+
+rather than R's native:
+
+``` r
+NA
+```
+
+If your dataset contains missing values, convert these strings to proper R `NA` values before analysis.

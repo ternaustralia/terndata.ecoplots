@@ -1,6 +1,11 @@
-## Accessing terndata.ecoplots from within R using reticulate
+####################################################################################################
+##
+## Example: Accessing terndata.ecoplots from within R using reticulate
 ##   - Select and download information for site "SAARIV0005" 
 ##   - Visualize changes in species cover between first and second visit
+##
+####################################################################################################
+
 
 ## load libraries
 
