@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from terndata.ecoplots import EcoPlotsError
+from terndata.ecoplots._nlp_utils import resolve_region_type
 from terndata.ecoplots._utils import (
     _align_and_concat,
     _ensure_ecoproj_path,
@@ -9,6 +10,32 @@ from terndata.ecoplots._utils import (
     _to_geopandas,
     _validate_spatial_input,
 )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "IBRA7 Bioregions",
+        "IBRA7-Bioregions",
+        "ibra7_bioregions",
+        "bioregions",
+    ],
+)
+def test_resolve_region_type_accepts_ibra7_bioregion_aliases(raw):
+    assert resolve_region_type(raw) == "ibra7-bioregions"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "IBRA7 Subregions",
+        "IBRA7-Subregions",
+        "ibra7_subregions",
+        "subregions",
+    ],
+)
+def test_resolve_region_type_accepts_ibra7_subregion_aliases(raw):
+    assert resolve_region_type(raw) == "ibra7-subregions"
 
 
 @pytest.mark.parametrize(
