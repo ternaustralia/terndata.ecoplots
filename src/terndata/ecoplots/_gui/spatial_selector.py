@@ -120,7 +120,7 @@ def spatial_selector(
     # Map
     m = Map(center=center, zoom=zoom, scroll_wheel_zoom=True, attribution_control=False)
     m.layout = Layout(width="100%", height="500px")
-    m.add_layer(basemap_to_tiles(basemaps.CartoDB.Positron))
+    m.add_layer(basemap_to_tiles(basemaps.Esri.WorldGrayCanvas))
     m.fit_bounds(_AU_BOUNDS)
     m.max_bounds = _AU_BOUNDS
 
