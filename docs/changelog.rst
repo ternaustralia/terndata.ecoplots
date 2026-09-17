@@ -3,6 +3,13 @@ Change Log
 
 Changes over time for the EcoPlots Python library.
 
+v1.1.2 (2026-09-17)
+-------------------
+
+- Updated the spatial selector to use the key-free Esri World Shaded Relief basemap, removing the Carto watermark while retaining a subdued map style.
+- Fixed Parquet output for columns containing mixed numeric values and ``"N/A"`` placeholders by converting those placeholders to null values during Parquet serialization.
+- Fixed region type resolution for IBRA7 bioregions and subregions, including space-, hyphen-, and underscore-separated names and the legacy ``bioregions`` and ``subregions`` aliases.
+
 v1.1.1 (2026-06-26)
 -------------------
 
