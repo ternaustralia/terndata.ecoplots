@@ -107,9 +107,11 @@ def test_get_data_rejects_invalid_format():
 
 def test_get_data_returns_parquet_bytes(monkeypatch):
     ec = MockEcoPlots(query_filters={"site_id": ["site-uri"]})
+    captured = {}
 
     def fake_to_parquet(self, path, index=False):
         assert index is False
+        captured["dataframe"] = self.copy()
         path.write(b"PARQUET")
 
     monkeypatch.setattr(pd.DataFrame, "to_parquet", fake_to_parquet)
@@ -117,6 +119,8 @@ def test_get_data_returns_parquet_bytes(monkeypatch):
     payload = ec.get_data(dformat="parquet")
 
     assert payload == b"PARQUET"
+    assert captured["dataframe"].loc[0, "b"] is None
+    assert captured["dataframe"].loc[1, "a"] is None
 
 
 def test_export_data_writes_nested_csv(tmp_path):

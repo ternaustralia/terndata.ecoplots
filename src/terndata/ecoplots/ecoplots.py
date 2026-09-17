@@ -64,9 +64,14 @@ _FILE_FORMAT_SUFFIXES = {
 
 def _dataframe_to_parquet_bytes(df: pd.DataFrame) -> bytes:
     """Serialise a dataframe to parquet bytes."""
+    parquet_df = df.copy()
+    for column in parquet_df.select_dtypes(include=["object", "string"]).columns:
+        values = parquet_df[column].astype(object)
+        parquet_df[column] = values.mask(values.eq("N/A"), None)
+
     buffer = io.BytesIO()
     try:
-        df.to_parquet(buffer, index=False)
+        parquet_df.to_parquet(buffer, index=False)
     except (ImportError, ValueError) as exc:
         raise EcoPlotsError(
             "Parquet output requires pyarrow. Reinstall or upgrade with: "

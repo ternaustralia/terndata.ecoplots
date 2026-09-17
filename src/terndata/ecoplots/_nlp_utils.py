@@ -13,13 +13,16 @@ from ._config import MATERIAL_SAMPLE_TYPE_MAP
 ALL_FACETS = ["region_type", "region", "dataset", "feature_type", "observed_property"]
 
 REGION_TYPES_MAP = {
-    "subregions": "https://linked.data.gov.au/dataset/ibra7/subregions",
-    "bioregions": "https://linked.data.gov.au/dataset/ibra7",
+    "ibra7-subregions": "https://linked.data.gov.au/dataset/ibra7/subregions",
+    "ibra7-bioregions": "https://linked.data.gov.au/dataset/ibra7",
     "nrm-regions": "https://linked.data.gov.au/dataset/ausnrm2023",
     "states-and-territories": "https://linked.data.gov.au/dataset/asgsed3/STE",
     "local-government-areas": "https://linked.data.gov.au/dataset/asgsed3/LGA2023",
     "wwf-ecoregions": "https://linked.data.gov.au/dataset/wwf2011",
     "terrestrial-capad-regions": "https://linked.data.gov.au/dataset/auscapad2022",
+    "indigenous-areas": "https://linked.data.gov.au/dataset/asgsed3/IARE",
+    "indigenous-locations": "https://linked.data.gov.au/dataset/asgsed3/ILOC",
+    "indigenous-regions": "https://linked.data.gov.au/dataset/asgsed3/IREG",
 }
 
 REGION_TYPES = list(REGION_TYPES_MAP.keys())
@@ -127,10 +130,15 @@ def resolve_region_type(
 
     # --- Case 2: Input is label (not URL) ---
     # Normalize user input
-    user_input = re.sub(
-        r"\bibra7[-_ ]*", "", user_input, flags=re.IGNORECASE
-    )  # Remove 'ibra7' prefix if present
-    cleaned_input = user_input.strip().replace(" ", "-").lower()
+    cleaned_input = re.sub(r"[-_\s]+", "-", user_input.strip()).lower()
+    cleaned_input = {
+        "bioregions": "ibra7-bioregions",
+        "subregions": "ibra7-subregions",
+    }.get(cleaned_input, cleaned_input)
+
+    if cleaned_input in allowed_region_types:
+        return cleaned_input
+
     if cleaned_input.startswith("l"):
         threshold = 20
     result = process.extractOne(cleaned_input, allowed_region_types, scorer=fuzz.QRatio)  # type: ignore
