@@ -13,17 +13,20 @@ from ._config import MATERIAL_SAMPLE_TYPE_MAP
 ALL_FACETS = ["region_type", "region", "dataset", "feature_type", "observed_property"]
 
 REGION_TYPES_MAP = {
-    "subregions": "https://linked.data.gov.au/dataset/ibra7/subregions",
-    "bioregions": "https://linked.data.gov.au/dataset/ibra7",
-    "nrm-regions": "https://linked.data.gov.au/dataset/ausnrm2023",
-    "states-and-territories": "https://linked.data.gov.au/dataset/asgsed3/STE",
-    "local-government-areas": "https://linked.data.gov.au/dataset/asgsed3/LGA2023",
-    "wwf-ecoregions": "https://linked.data.gov.au/dataset/wwf2011",
-    "terrestrial-capad-regions": "https://linked.data.gov.au/dataset/auscapad2022",
+    "https://linked.data.gov.au/dataset/asgsed3/IARE": "Indigenous Areas",
+    "https://linked.data.gov.au/dataset/asgsed3/ILOC": "Indigenous Locations",
+    "https://linked.data.gov.au/dataset/asgsed3/IREG": "Indigenous Regions",
+    "https://linked.data.gov.au/dataset/asgsed3/LGA2023": "Local Government Areas",
+    "https://linked.data.gov.au/dataset/asgsed3/STE": "States and Territories",
+    "https://linked.data.gov.au/dataset/auscapad2022": "Terrestrial CAPAD regions",
+    "https://linked.data.gov.au/dataset/ausnrm2023": "NRM regions",
+    "https://linked.data.gov.au/dataset/ibra7": "IBRA7 Bioregions",
+    "https://linked.data.gov.au/dataset/ibra7/subregions": "IBRA7 Subregions",
+    "https://linked.data.gov.au/dataset/wwf2011": "WWF ecoregions",
 }
 
-REGION_TYPES = list(REGION_TYPES_MAP.keys())
-REGION_URLS = list(REGION_TYPES_MAP.values())
+REGION_TYPES = list(REGION_TYPES_MAP.values())
+REGION_URLS = list(REGION_TYPES_MAP.keys())
 
 
 def _display_warning(message: str) -> None:
@@ -98,7 +101,7 @@ def resolve_region_type(
     if user_input.startswith("http://") or user_input.startswith("https://"):
         if user_input in REGION_URLS:
             # Perfect match
-            return next(k for k, v in REGION_TYPES_MAP.items() if v == user_input)
+            return REGION_TYPES_MAP[user_input]
 
         # Fuzzy match against known URLs
         result = process.extractOne(user_input, REGION_URLS, scorer=fuzz.QRatio)  # type: ignore
@@ -109,7 +112,7 @@ def resolve_region_type(
             if score >= threshold:
                 # Auto-correct but warn user
                 _display_warning(f"Input URL '{user_input}' corrected to '{best_url}'.")
-                return next(k for k, v in REGION_TYPES_MAP.items() if v == best_url)
+                return REGION_TYPES_MAP[best_url]
         # Suggest but don't auto-correct
         result = process.extractOne(user_input, REGION_URLS, scorer=fuzz.QRatio)  # type: ignore
         if result is None:
@@ -127,13 +130,17 @@ def resolve_region_type(
 
     # --- Case 2: Input is label (not URL) ---
     # Normalize user input
-    user_input = re.sub(
-        r"\bibra7[-_ ]*", "", user_input, flags=re.IGNORECASE
-    )  # Remove 'ibra7' prefix if present
-    cleaned_input = user_input.strip().replace(" ", "-").lower()
+    cleaned_input = re.sub(r"[-_\s]+", " ", user_input.strip()).casefold()
+    if cleaned_input in {"bioregions", "subregions"}:
+        cleaned_input = "ibra7 " + cleaned_input
     if cleaned_input.startswith("l"):
         threshold = 20
-    result = process.extractOne(cleaned_input, allowed_region_types, scorer=fuzz.QRatio)  # type: ignore
+    result = process.extractOne(
+        cleaned_input,
+        allowed_region_types,
+        scorer=fuzz.QRatio,
+        processor=lambda value: re.sub(r"[-_\s]+", " ", value.strip()).casefold(),
+    )
     if result is not None:
         match, score, _ = result
         if score >= threshold:
@@ -321,7 +328,7 @@ def validate_facet(facet, value) -> tuple:
         labels_dict = MATERIAL_SAMPLE_TYPE_MAP
     else:
         labels_dict = _get_cached_labels(facet if facet != "project" else "dataset")
-    
+
     user_values = list(value) if isinstance(value, (list, tuple)) else [value]
     urls, matched, unmatched, corrected = resolve_filter_values_to_urls(
         facet, user_values, labels_dict

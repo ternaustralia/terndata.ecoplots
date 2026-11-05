@@ -9,3 +9,5 @@ API Reference
    api/ecoplots_samples
    api/ecoplots_class
    api/async_ecoplots_class
+   api/data_jobs
+   api/citations

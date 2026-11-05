@@ -19,6 +19,8 @@ pip install "terndata.ecoplots[gui]"   # Jupyter widgets
 | **Class** | `EcoPlots` | `AsyncEcoPlots` |
 | **`get_data()`** | Blocking | `await`-able |
 | **`get_data_stream()`** | — | async iterator |
+| **`submit_data_job()`** | Job handle | Async job handle |
+| **`export_data()`** | Blocking | `await`-able |
 | **Everything else** | Sync | Sync (inherited) |
 
 ```python
@@ -176,6 +178,33 @@ async for gdf_chunk in aec.get_data_stream(dformat="gpd"):
 async for parquet_chunk in aec.get_data_stream(dformat="pq"):
     ...
 ```
+
+### Data Jobs
+
+Observation `get_data()` calls handle submission, polling, and retrieval automatically.
+To submit the selected query and retrieve it later:
+
+```python
+job = ec.submit_data_job()  # CSV; dformat="geojson" is also supported
+job.refresh()
+print(job.status)
+job.download("observations.csv")
+
+for frame in job.stream():
+    ...
+
+# Async
+job = aec.submit_data_job()
+job.refresh()
+await job.download("observations.csv")
+
+async for frame in job.stream():
+    ...
+```
+
+CSV downloads combine feature types into one file. Streaming yields a DataFrame
+per CSV feature type, or bytes for GeoJSON. `wait()`, `stream()`, and `download()`
+accept `timeout` and `poll_interval` in seconds.
 
 ### Spatial Widget
 

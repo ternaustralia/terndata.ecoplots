@@ -107,10 +107,11 @@ See Also:
 import threading
 
 from ._exceptions import EcoPlotsError
+from ._jobs import AsyncDataJob, DataJob
 from ._utils import _background_cache_loader
 from .ecoplots import AsyncEcoPlots, EcoPlots
 
-__all__ = ["EcoPlots", "AsyncEcoPlots", "EcoPlotsError"]
+__all__ = ["EcoPlots", "AsyncEcoPlots", "EcoPlotsError", "DataJob", "AsyncDataJob"]
 
 # Start the background cache loading thread at import time (best-effort).
 _cache_thread = threading.Thread(target=_background_cache_loader, daemon=True)

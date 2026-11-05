@@ -142,6 +142,37 @@ async for chunk in ec.get_data_stream(dformat="gpd"):
     ...
 ```
 
+### Data jobs (observations)
+
+`get_data()` handles job submission, polling, and retrieval automatically. To submit work and retrieve it later, use `submit_data_job(dformat="csv")` or `dformat="geojson"`:
+
+```python
+ec = EcoPlots()
+ec.select(site_id="TCFTNS0002")
+job = ec.submit_data_job()  # EcoPlots; CSV by default
+job.refresh()
+print(job.status)
+job.download("observations.csv")  # Wait and save the complete result
+
+for frame in job.stream():
+    ...
+```
+
+With `AsyncEcoPlots`:
+
+```python
+aec = AsyncEcoPlots()
+aec.select(site_id="TCFTNS0002")
+job = aec.submit_data_job()
+job.refresh()
+await job.download("observations.csv")
+
+async for frame in job.stream():
+    ...
+```
+
+CSV streaming yields a DataFrame per feature type; GeoJSON streaming yields bytes. CSV downloads combine all results into one file. Job methods accept `timeout` and `poll_interval` in seconds.
+
 ---
 
 ## Interactive Widgets
@@ -206,11 +237,17 @@ All checks are also available via `tox` — see `tox.ini` for environment defini
 
 ## Citation
 
-Terrestrial Ecosystem Research Network (2026). *terndata.ecoplots: A Python package for accessing TERN EcoPlots data*. https://pypi.org/project/terndata.ecoplots/
+Generate citations for the current filters, including the software reference:
 
-For citation metadata, see [`CITATION.cff`](CITATION.cff). This cites the
-software tool itself; data accessed through EcoPlots may require separate
-dataset-specific citation and attribution.
+```python
+print(ec.cite())
+ec.cite(path="references.ris")  # Save for EndNote and other reference managers
+```
+
+Use `dformat="ris"` to return RIS text, or save to `.txt` for readable text.
+The software citation credits Avinash Chandra, with TERN Data Services and
+Analytics affiliation, as recorded in [`CITATION.cff`](CITATION.cff), and includes
+the installed package version.
 
 ---
 

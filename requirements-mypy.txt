@@ -1,6 +1,7 @@
 mypy
 pandas-stubs
 types-requests
+types-PyYAML
 types-python-dateutil
 types-pytz
 types-defusedxml

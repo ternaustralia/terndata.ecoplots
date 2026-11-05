@@ -34,6 +34,7 @@ Examples:
 """
 
 import asyncio
+import copy
 import io
 from pathlib import Path
 from typing import Optional, Union, cast
@@ -44,8 +45,14 @@ import pandas as pd
 from diskcache import Cache
 
 from ._base import EcoPlotsBase
+from ._citations import (
+    _citation_format,
+    _render_citations,
+    fetch_citations,
+)
 from ._config import CACHE_DIR, MATERIAL_SAMPLE_TYPE_MAP
 from ._exceptions import EcoPlotsError
+from ._jobs import AsyncDataJob, DataJob, submit_jobs
 from ._utils import (
     _align_and_concat,
     _run_sync,
@@ -80,6 +87,15 @@ def _csv_bytes_to_dataframe(csv_bytes: bytes) -> pd.DataFrame:
     if not csv_bytes or not csv_bytes.strip():
         return pd.DataFrame()
     return pd.read_csv(io.BytesIO(csv_bytes))
+
+
+def _format_table(df: pd.DataFrame, dformat):
+    """Convert a retrieved table to the requested public format."""
+    if dformat in ("pandas", "pd"):
+        return pd.DataFrame(df)
+    if dformat in ("parquet", "pq"):
+        return _dataframe_to_parquet_bytes(pd.DataFrame(df))
+    return _to_geopandas(df)
 
 
 def _infer_file_dformat(path: Union[str, Path], mode: str) -> str:
@@ -411,6 +427,34 @@ class EcoPlots(EcoPlotsBase):
             return aligned_df
 
         return _to_geopandas(aligned_df)
+
+    def cite(
+        self,
+        dformat: Optional[str] = None,
+        path: Optional[Union[str, Path]] = None,
+    ) -> str:
+        """Cite data matching the current filters and this software.
+
+        Args:
+            dformat: ``"text"`` (default) or ``"ris"``. When a path is supplied,
+                the format is inferred from its extension unless specified.
+            path: Optional ``.ris`` or ``.txt`` destination.
+
+        Returns:
+            Citation text, or the absolute saved path when ``path`` is supplied.
+
+        Examples:
+            Basic Usage:
+
+            .. code-block:: python
+
+                print(ec.cite())
+                ec.cite(path="references.ris")
+        """
+        selected = _citation_format(dformat, path)
+        query = copy.deepcopy(self._query_filters)
+        response = fetch_citations(self._base_url, query, self._mode)
+        return _render_citations(response, selected, path)
 
     def get_datasources(self) -> pd.DataFrame:
         """Get the data sources available for applied filters.
@@ -830,12 +874,50 @@ class EcoPlots(EcoPlotsBase):
 
         return cast(pd.DataFrame, self.discover_species())
 
+    def _data_job_payloads(self, dformat, query):
+        if self._mode != "observations":
+            raise EcoPlotsError("submit_data_job() is available in observations mode only.")
+        self._validate_data_format(dformat)
+        if dformat == "geojson":
+            return [{"query": query}]
+        feature_types = pd.DataFrame(
+            EcoPlotsBase.discover(self, "feature_type", query_filters=query)
+        )
+        if "uri" not in feature_types.columns:
+            raise EcoPlotsError("No feature types found; cannot submit data jobs.")
+        uris = feature_types["uri"].dropna().astype(str).drop_duplicates().tolist()
+        return [{"query": {**copy.deepcopy(query), "feature_type": [uri]}} for uri in uris]
+
+    def submit_data_job(self, dformat: str = "csv") -> DataJob:
+        """Submit the current observation query without waiting for output.
+
+        Args:
+            dformat: Server output format: ``"csv"`` (default) or ``"geojson"``.
+
+        Returns:
+            A job handle with ``status``, ``refresh()``, ``wait()``, ``stream()``,
+            and ``download(path)``. CSV feature-type jobs are managed internally.
+
+        Examples:
+            Basic Usage:
+
+            .. code-block:: python
+                job = ec.submit_data_job()
+                job.refresh()
+                job.download("observations.csv")
+        """
+        query = copy.deepcopy(self._query_filters)
+        payloads = self._data_job_payloads(dformat, query)
+        return submit_jobs(self._base_url, dformat, payloads)
+
     def get_data(
         self,
         allow_full_download: Optional[bool] = False,
         dformat: Optional[str] = "gpd",
-    ) -> gpd.GeoDataFrame:
+    ) -> Union[gpd.GeoDataFrame, pd.DataFrame, bytes, dict]:
         """Retrieve EcoPlots data based on the current filters.
+
+        Observation jobs are submitted, polled, and downloaded automatically.
 
         Args:
             allow_full_download: If True, allows downloading the full
@@ -897,43 +979,17 @@ class EcoPlots(EcoPlotsBase):
                 "If you are sure, call get_data(allow_full_download=True)."
             )
 
-        if dformat in ("geojson", "json"):
-            data = self.fetch_data_sync()
-            return data
-
-        if dformat not in _TABLE_FORMATS:
+        if dformat not in (None, *_TABLE_FORMATS, "geojson", "json"):
             raise EcoPlotsError(
-                "Invalid 'dformat' specified. Supported values are: None, "
-                "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', "
-                "'json', and 'parquet' (or 'pq')."
+                "Invalid 'dformat' specified. Supported values are: "
+                "'pandas'/'pd', 'geopandas'/'gpd', 'geojson'/'json', and 'parquet'/'pq'."
             )
-
-        feature_types_df = self.get_feature_types()
-
-        if "uri" not in feature_types_df.columns:
-            raise RuntimeError("No feature types found; cannot fetch data.")
-
-        uris = feature_types_df["uri"].dropna().astype(str).tolist()
-
-        if not uris:
-            # No feature types found, so no data to fetch;
-            # return empty gdf
-            return gpd.GeoDataFrame()
-
-        dfs = []
-        for uri in uris:
-            csv_bytes = cast(bytes, self.fetch_data_sync(dformat="csv", feature_type=[uri]))
-            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
-            dfs.append(df)
-
-        aligned_df = _align_and_concat(dfs)
-
-        if dformat in ("pandas", "pd"):
-            return aligned_df
-        if dformat in ("parquet", "pq"):
-            return _dataframe_to_parquet_bytes(aligned_df)
-
-        return _to_geopandas(aligned_df)
+        server_format = "geojson" if dformat in ("geojson", "json") else "csv"
+        job = self.submit_data_job(dformat=server_format)
+        result = job._result()
+        if server_format == "geojson":
+            return orjson.loads(result)
+        return _format_table(result, dformat)
 
     def export_data(
         self,
@@ -1079,8 +1135,8 @@ class AsyncEcoPlots(EcoPlots):
             gdf = await ec.get_data()          # await the heavy network call
 
     Notes:
-        - Only `get_data()` is async here. Other methods inherited from
-          `EcoPlots` are synchronous and **will block**.
+        - Data retrieval, streaming, and export are async. Other methods remain
+          synchronous.
         - Safety guard: `get_data()` raises `RuntimeError` when no filters
           are set unless `allow_full_download=True`.
     """
@@ -1103,12 +1159,27 @@ class AsyncEcoPlots(EcoPlots):
         """
         super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
-    async def get_data(
+    def submit_data_job(self, dformat: str = "csv") -> AsyncDataJob:  # type: ignore[override]
+        """Submit the current observation query synchronously without waiting for output.
+
+        Args:
+            dformat: Server output format: ``"csv"`` (default) or ``"geojson"``.
+
+        Returns:
+            A job handle with ``status`` and ``refresh()``, awaitable ``wait()``
+            and ``download(path)``, and an async ``stream()`` iterator.
+        """
+        job = super().submit_data_job(dformat)
+        return AsyncDataJob(self._base_url, dformat, job.jobs)
+
+    async def get_data(  # type: ignore[override]
         self,
         allow_full_download: Optional[bool] = False,
         dformat: Optional[str] = "gpd",
-    ) -> gpd.GeoDataFrame:  # noqa: DAR401
+    ) -> Union[gpd.GeoDataFrame, pd.DataFrame, bytes, dict]:  # noqa: DAR401
         """Retrieve EcoPlots data asynchronously based on the current filters.
+
+        Observation jobs are submitted, polled, and downloaded automatically.
 
         Args:
             allow_full_download: If True, allows downloading the full
@@ -1145,60 +1216,28 @@ class AsyncEcoPlots(EcoPlots):
                 )
 
             samples_gdf = cast(gpd.GeoDataFrame, await self.fetch_samples_data())
-            if dformat in ("parquet", "pq"):
-                return _dataframe_to_parquet_bytes(pd.DataFrame(samples_gdf))
-            if dformat in ("pandas", "pd"):
-                return pd.DataFrame(samples_gdf)
+            if dformat in ("parquet", "pq", "pandas", "pd"):
+                return await asyncio.to_thread(_format_table, samples_gdf, dformat)
             return samples_gdf
 
-        if not self._filters and not allow_full_download:
+        if not self._query_filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
                 "can crash your environment. Proceed with caution!\n"
                 "If you are sure, call get_data(allow_full_download=True)."
             )
 
-        if dformat in ("geojson", "json"):
-            data = await self.fetch_data()
-            return data
-
-        if dformat not in (None, *_TABLE_FORMATS):
+        if dformat not in (None, *_TABLE_FORMATS, "geojson", "json"):
             raise EcoPlotsError(
-                "Invalid 'dformat' specified. Supported values are: None, "
-                "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', "
-                "'json', and 'parquet' (or 'pq')."
+                "Invalid 'dformat' specified. Supported values are: "
+                "'pandas'/'pd', 'geopandas'/'gpd', 'geojson'/'json', and 'parquet'/'pq'."
             )
-
-        # for pandas/geopandas output, we request one csv per feature type and merge
-        feature_types_df = self.get_feature_types()
-
-        if "uri" not in feature_types_df.columns:
-            raise RuntimeError("No feature types found; cannot fetch data.")
-        uris = feature_types_df["uri"].dropna().astype(str).tolist()
-
-        if not uris:
-            # No feature types found, so no data to fetch;
-            # return empty gdf
-            return gpd.GeoDataFrame()
-
-        dfs = []
-        tasks = [
-            asyncio.create_task(self.fetch_data(dformat="csv", feature_type=[uri])) for uri in uris
-        ]
-        for task in asyncio.as_completed(tasks):
-            payload = await task
-            csv_bytes = cast(bytes, payload)
-            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
-            dfs.append(df)
-
-        aligned_df = _align_and_concat(dfs)
-
-        if dformat in ("pandas", "pd"):
-            return aligned_df
-        if dformat in ("parquet", "pq"):
-            return _dataframe_to_parquet_bytes(aligned_df)
-
-        return _to_geopandas(aligned_df)
+        server_format = "geojson" if dformat in ("geojson", "json") else "csv"
+        job = await asyncio.to_thread(self.submit_data_job, dformat=server_format)
+        result = await job._result()
+        if server_format == "geojson":
+            return await asyncio.to_thread(orjson.loads, result)
+        return await asyncio.to_thread(_format_table, result, dformat)
 
     async def get_data_stream(
         self,
@@ -1245,7 +1284,7 @@ class AsyncEcoPlots(EcoPlots):
             yield data
             return
 
-        if not self._filters and not allow_full_download:
+        if not self._query_filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
                 "can crash your environment. Proceed with caution!\n"
@@ -1253,8 +1292,12 @@ class AsyncEcoPlots(EcoPlots):
             )
 
         if dformat in ("geojson", "json"):
-            async for line in self.iter_fetch_data_lines(dformat="geojson"):
-                yield line
+            lines = self.iter_fetch_data_lines(dformat="geojson")
+            try:
+                async for line in lines:
+                    yield line
+            finally:
+                await lines.aclose()
             return
 
         if dformat not in ("geopandas", "gpd", "parquet", "pq"):
@@ -1263,25 +1306,13 @@ class AsyncEcoPlots(EcoPlots):
                 "'geopandas' (or 'gpd'), 'parquet' (or 'pq'), and 'geojson'/'json'."
             )
 
-        feature_types_df = self.get_feature_types()
-
-        if "uri" not in feature_types_df.columns:
-            raise RuntimeError("No feature types found; cannot fetch data.")
-
-        uris = feature_types_df["uri"].dropna().astype(str).tolist()
-        if not uris:
-            return
-
-        tasks = [
-            asyncio.create_task(self.fetch_data(dformat="csv", feature_type=[uri])) for uri in uris
-        ]
-        for task in asyncio.as_completed(tasks):
-            csv_bytes = cast(bytes, await task)
-            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
-            if dformat in ("parquet", "pq"):
-                yield _dataframe_to_parquet_bytes(df)
-            else:
-                yield _to_geopandas(df)
+        job = await asyncio.to_thread(self.submit_data_job)
+        chunks = job.stream()
+        try:
+            async for df in chunks:
+                yield await asyncio.to_thread(_format_table, df, dformat)
+        finally:
+            await chunks.aclose()
 
     async def export_data(
         self,
@@ -1318,4 +1349,4 @@ class AsyncEcoPlots(EcoPlots):
             allow_full_download=allow_full_download,
             dformat=normalized,
         )
-        return _write_data_to_file(data, path, normalized)
+        return await asyncio.to_thread(_write_data_to_file, data, path, normalized)

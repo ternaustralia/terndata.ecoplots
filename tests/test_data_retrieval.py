@@ -8,39 +8,15 @@ import pytest
 from terndata.ecoplots import AsyncEcoPlots, EcoPlots, EcoPlotsError
 from terndata.ecoplots._base import EcoPlotsBase
 
+pytestmark = pytest.mark.usefixtures("data_api")
+
 
 class MockEcoPlots(EcoPlots):
-    def get_feature_types(self):
-        return pd.DataFrame({"uri": ["feature-a", "feature-b"]})
-
-    def fetch_data_sync(self, *args, **kwargs):
-        feature_type = kwargs.get("feature_type", ["feature-a"])[0]
-        if kwargs.get("dformat") == "csv":
-            if feature_type == "feature-a":
-                return b"site_id,longitude_Degree,latitude_Degree,a\nA,153.0,-27.0,one\n"
-            return b"site_id,longitude_Degree,latitude_Degree,b\nB,154.0,-28.0,two\n"
-        return {"type": "FeatureCollection", "features": []}
-
-    async def fetch_data(self, *args, **kwargs):
-        feature_type = kwargs.get("feature_type", ["feature-a"])[0]
-        if kwargs.get("dformat") == "csv":
-            if feature_type == "feature-a":
-                return b"site_id,longitude_Degree,latitude_Degree,a\nA,153.0,-27.0,one\n"
-            return b"site_id,longitude_Degree,latitude_Degree,b\nB,154.0,-28.0,two\n"
-        return {"type": "FeatureCollection", "features": []}
+    pass
 
 
 class MockAsyncEcoPlots(AsyncEcoPlots):
-    def get_feature_types(self):
-        return pd.DataFrame({"uri": ["feature-a", "feature-b"]})
-
-    async def fetch_data(self, *args, **kwargs):
-        feature_type = kwargs.get("feature_type", ["feature-a"])[0]
-        if kwargs.get("dformat") == "csv":
-            if feature_type == "feature-a":
-                return b"site_id,longitude_Degree,latitude_Degree,a\nA,153.0,-27.0,one\n"
-            return b"site_id,longitude_Degree,latitude_Degree,b\nB,154.0,-28.0,two\n"
-        return {"type": "FeatureCollection", "features": []}
+    pass
 
 
 class MockSamplesEcoPlots(EcoPlots):

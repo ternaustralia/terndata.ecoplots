@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use terndata.ecoplots in your research, please cite this software. Data accessed through EcoPlots may require separate dataset-specific citation and attribution."
+type: software
+title: "terndata.ecoplots: A Python package for accessing TERN EcoPlots data"
+abstract: "A Python client for discovering, filtering, previewing, and retrieving ecological plot observation and sample data from the TERN EcoPlots platform."
+authors:
+  - family-names: Chandra
+    given-names: Avinash
+    email: avinash.chandra@uq.edu.au
+    affiliation: "TERN Data Services and Analytics"
+repository-code: "https://github.com/ternaustralia/terndata.ecoplots"
+url: "https://terndata-ecoplots.readthedocs.io"
+license: Apache-2.0
+keywords:
+  - TERN
+  - EcoPlots
+  - ecology
+  - biodiversity
+  - environmental data
+  - Python

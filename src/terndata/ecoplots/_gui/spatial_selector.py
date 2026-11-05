@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 from defusedxml import ElementTree as ET
 from ipyleaflet import (
+    AttributionControl,
     DrawControl,
     Map,
     WidgetControl,
@@ -28,8 +29,16 @@ from ipyleaflet import (
 from ipywidgets import HTML, Button, Checkbox, HBox, Layout, Output, VBox, ToggleButton
 from shapely.geometry import box as shp_box
 from shapely.geometry import shape as shp_shape
+from traitlets import Float, List
 
-_AU_BOUNDS = [[-43.8, 112.9], [-10.6, 153.6]]  # [ [south, west], [north, east] ]
+_AU_BOUNDS = [[-44.0, 112.0], [-10.0, 154.0]]  # [[south, west], [north, east]]
+
+
+class _AustraliaMap(Map):
+    """Expose Leaflet's pan limits as synchronized map options."""
+
+    max_bounds = List(default_value=_AU_BOUNDS).tag(sync=True, o=True)
+    max_bounds_viscosity = Float(1.0).tag(sync=True, o=True)
 
 
 def _extract_geometry(geo_json: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -118,11 +127,32 @@ def spatial_selector(
         ipywidgets.VBox for display in Jupyter.
     """
     # Map
-    m = Map(center=center, zoom=zoom, scroll_wheel_zoom=True, attribution_control=False)
+    basemap = basemap_to_tiles(
+        basemaps.Esri.WorldGrayCanvas,
+        max_native_zoom=16,
+        no_wrap=True,
+        bounds=_AU_BOUNDS,
+    )
+    basemap.max_zoom = 18
+    basemap.attribution = (
+        '<a href="https://www.esri.com/">Esri</a>, HERE, Garmin, '
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
+        "contributors, GIS user community"
+    )
+    m = _AustraliaMap(
+        center=center,
+        zoom=max(4, min(zoom, 18)),
+        min_zoom=4,
+        max_zoom=18,
+        basemap=basemap,
+        scroll_wheel_zoom=True,
+        bounce_at_zoom_limits=False,
+        attribution_control=False,
+    )
+    m.add(AttributionControl(prefix="", position="bottomleft"))
+    m.add_class("ecop-spatial-map")
     m.layout = Layout(width="100%", height="500px")
-    m.add_layer(basemap_to_tiles(basemaps.CartoDB.Positron))
     m.fit_bounds(_AU_BOUNDS)
-    m.max_bounds = _AU_BOUNDS
 
     # DrawControl: enable rectangle + polygon
     draw = DrawControl(
@@ -140,6 +170,17 @@ def spatial_selector(
     css = HTML(
         value="""
         <style>
+          .ecop-spatial-map .leaflet-control-attribution {
+              font-size: 10px;
+              line-height: 1.3;
+              color: #666;
+              background: rgba(255, 255, 255, 0.85);
+              padding: 1px 4px;
+          }
+          .ecop-spatial-map .leaflet-control-attribution a {
+              color: inherit;
+          }
+
           /* Hide Leaflet Draw edit/remove toolbar and actions */
           .leaflet-draw-toolbar .leaflet-draw-edit-edit,
           .leaflet-draw-toolbar .leaflet-draw-edit-remove,

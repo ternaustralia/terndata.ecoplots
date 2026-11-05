@@ -283,6 +283,9 @@ methods.
 Data Preview & Retrieval
 ------------------------
 
+``get_data()`` handles job submission, polling, and retrieval automatically.
+For deferred retrieval, use ``submit_data_job()``; see :doc:`data_jobs`.
+
 .. automethod:: EcoPlots.summary
    :no-index:
 
@@ -293,6 +296,9 @@ Data Preview & Retrieval
    :no-index:
 
 .. automethod:: EcoPlots.export_data
+   :no-index:
+
+.. automethod:: EcoPlots.submit_data_job
    :no-index:
 
 **Typical workflow**

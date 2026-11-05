@@ -1,3 +1,5 @@
+import asyncio
+import codecs
 import copy
 import hashlib
 import struct
@@ -6,7 +8,6 @@ import tempfile
 import warnings
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from diskcache import Cache
 from pathlib import Path
 from typing import (
     Optional,
@@ -16,20 +17,22 @@ from typing import (
 
 import orjson
 import requests
+from diskcache import Cache
 from rapidfuzz import fuzz, process
 
 from ._config import (
     API_BASE_URL,
+    CACHE_DIR,
     DISCOVERY_ATTRIBUTES,
     DISCOVERY_FACETS,
     MAGIC,
+    MATERIAL_SAMPLE_TYPE_MAP,
     QUERY_FACETS,
     SAMPLE_QUERY_FACETS,
     VERSION,
-    CACHE_DIR,
-    MATERIAL_SAMPLE_TYPE_MAP,
 )
 from ._exceptions import EcoPlotsError
+from ._jobs import _aiohttp, _csv_bytes, async_submit_jobs, submit_jobs
 from ._nlp_utils import (
     resolve_facet,
     resolve_region_type,
@@ -963,7 +966,9 @@ class EcoPlotsBase:
         params = []
         if facet_param == "region" and region_type:
             region_type_val = resolve_region_type(region_type)
-            params.append(("region_type", region_type_val))
+            if region_type_val:
+                api_region_type = region_type_val.removeprefix("IBRA7 ").lower().replace(" ", "-")
+                params.append(("region_type", api_region_type))
         if facet_param == "site_id" and include_region:
             params.append(("include-regions", "True"))
 
@@ -1299,59 +1304,35 @@ class EcoPlotsBase:
 
         return pd.DataFrame(rows, columns=["speciesname", "count"])
 
+    def _data_payload(self, page_number=None, page_size=None, **extras):
+        payload = {"query": copy.deepcopy(self._query_filters)}
+        payload["query"].update(extras)
+        if (page_number is None) != (page_size is None):
+            raise EcoPlotsError("page_number and page_size must be provided together.")
+        if page_number is not None:
+            payload.update(page_number=page_number, page_size=page_size)
+        return payload
+
+    @staticmethod
+    def _validate_data_format(dformat):
+        if dformat not in ("geojson", "csv"):
+            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
+
     async def fetch_data(
         self,
         page_number: Optional[int] = None,
         page_size: Optional[int] = None,
         dformat: str = "geojson",
         **extras,
-    ) -> dict:
-        """Fetch data for the current query, optionally paginated.
-
-        Posts the current query filters to `EcoPlots API` data endpoint.
-
-        Args:
-            page_number: Page index to request. Must be provided together with ``page_size``.
-            page_size: Number of items per page. Must be provided together with ``page_number``.
-            dformat: Output format, either "geojson" (default) or "csv".
-            **extras: Additional query filters to merge into the current query
-
-        Returns:
-            Parsed JSON payload (GeoJSON) returned by the data endpoint.
-
-        Raises:
-            EcoPlotsError: If an invalid dformat is provided.
-
-        Notes:
-            - Timeout is 300s (5 min) when pagination is used; 3000s (50 min) otherwise.
-            - Socket read timeout matches total timeout; connection timeout is 30s.
-            - Intended for internal use only.
-        """
-        if dformat == "parquet":
-            raise EcoPlotsError(
-                "Parquet is available via get_data(dformat='parquet'), not fetch_data()."
-            )
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        line_iter = self.iter_fetch_data_lines(
-            page_number=page_number,
-            page_size=page_size,
-            dformat=dformat,
-            **extras,
-        )
+    ):
+        """Submit a single data job and asynchronously retrieve its complete output."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = await async_submit_jobs(self._base_url, dformat, [payload])
+        result = await job._result(preserve_strings=True)
         if dformat == "csv":
-            buffer = bytearray()
-            async for line in line_iter:
-                if buffer:
-                    buffer.extend(b"\n")
-                buffer.extend(line.encode("utf-8"))
-            return bytes(buffer)
-
-        buffer = bytearray()
-        async for line in line_iter:
-            buffer.extend(line.encode("utf-8"))
-        return orjson.loads(buffer)
+            return await asyncio.to_thread(_csv_bytes, result)
+        return await asyncio.to_thread(orjson.loads, result)
 
     def fetch_data_sync(
         self,
@@ -1359,33 +1340,13 @@ class EcoPlotsBase:
         page_size: Optional[int] = None,
         dformat: str = "geojson",
         **extras,
-    ) -> dict:
-        """Synchronously fetch data for the current query, optionally paginated."""
-        if dformat == "parquet":
-            raise EcoPlotsError(
-                "Parquet is available via get_data(dformat='parquet'), not fetch_data_sync()."
-            )
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        line_iter = self.iter_fetch_data_lines_sync(
-            page_number=page_number,
-            page_size=page_size,
-            dformat=dformat,
-            **extras,
-        )
-        if dformat == "csv":
-            buffer = bytearray()
-            for line in line_iter:
-                if buffer:
-                    buffer.extend(b"\n")
-                buffer.extend(line.encode("utf-8"))
-            return bytes(buffer)
-
-        buffer = bytearray()
-        for line in line_iter:
-            buffer.extend(line.encode("utf-8"))
-        return orjson.loads(buffer)
+    ):
+        """Submit a single data job and retrieve its complete output."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = submit_jobs(self._base_url, dformat, [payload])
+        result = job._result(preserve_strings=True)
+        return _csv_bytes(result) if dformat == "csv" else orjson.loads(result)
 
     def iter_fetch_data_lines_sync(
         self,
@@ -1394,41 +1355,25 @@ class EcoPlotsBase:
         dformat: str = "geojson",
         **extras,
     ):
-        """Synchronously yield decoded data-stream lines for the current query."""
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        payload = {
-            "query": copy.deepcopy(self._query_filters),
-            "page_number": page_number,
-            "page_size": page_size,
-        }
-
-        if extras and isinstance(payload["query"], dict):
-            payload["query"].update(extras)
-
-        if page_number and page_size:
-            payload.update({"page_number": page_number, "page_size": page_size})
-            timeout = 300
-        else:
-            del payload["page_number"]
-            del payload["page_size"]
-            timeout = 3000
-
-        with requests.post(
-            f"{self._base_url}/api/v1.0/data/stream",
-            params=[("dformat", dformat)],
-            json=payload,
-            timeout=timeout,
-            headers={"Accept": "text/event-stream"},
-            stream=True,
-        ) as resp:
-            resp.raise_for_status()
-            for line in resp.iter_lines(decode_unicode=True):
-                if line:
-                    line = line.strip()
-                    if line:
-                        yield line
+        """Yield decoded lines from a submitted job's stream."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = submit_jobs(self._base_url, dformat, [payload])
+        deadline = job._deadline(3000, 1)
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        pending = ""
+        chunks = job._iter_content(job._jobs[0], deadline, 1, True)
+        try:
+            for chunk in chunks:
+                pending += decoder.decode(chunk)
+                while "\n" in pending:
+                    line, pending = pending.split("\n", 1)
+                    yield line.rstrip("\r")
+        finally:
+            chunks.close()
+        pending += decoder.decode(b"", final=True)
+        if pending:
+            yield pending.rstrip("\r")
 
     def fetch_samples_data_sync(self):
         """Synchronously fetch sample data from the samples endpoint."""
@@ -1539,61 +1484,26 @@ class EcoPlotsBase:
         dformat: str = "geojson",
         **extras,
     ):
-        """Yield decoded data-stream lines for the current query.
-
-        Args:
-            page_number: Page index to request. Must be provided together with ``page_size``.
-            page_size: Number of items per page. Must be provided together with ``page_number``.
-            dformat: Stream format, either ``"geojson"`` or ``"csv"``.
-            **extras: Additional query filters to merge into the current query.
-
-        Yields:
-            Non-empty decoded response lines with surrounding whitespace removed.
-
-        Raises:
-            EcoPlotsError: If an invalid dformat is provided.
-        """
-        try:
-            import aiohttp
-        except ImportError as exc:
-            raise EcoPlotsError(
-                "Data streaming requires aiohttp. Install it with: "
-                "pip install terndata.ecoplots[async]"
-            ) from exc
-
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        payload = {
-            "query": copy.deepcopy(self._query_filters),
-            "page_number": page_number,
-            "page_size": page_size,
-        }
-
-        if extras and isinstance(payload["query"], dict):
-            payload["query"].update(extras)
-
-        if page_number and page_size:
-            payload.update({"page_number": page_number, "page_size": page_size})
-            timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
-        else:
-            del payload["page_number"]
-            del payload["page_size"]
-            timeout = aiohttp.ClientTimeout(total=3000, sock_read=3000, sock_connect=30)
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self._base_url}/api/v1.0/data/stream?dformat={dformat}",
-                json=payload,
-                timeout=timeout,
-                headers={"Accept": "text/event-stream"},
-            ) as resp:
-                resp.raise_for_status()
-
-                async for line in resp.content:
-                    line = line.decode("utf-8").strip()
-                    if line:
-                        yield line
+        """Asynchronously yield decoded lines from a submitted job's stream."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = await async_submit_jobs(self._base_url, dformat, [payload])
+        deadline = job._deadline(3000, 1)
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        pending = ""
+        async with _aiohttp().ClientSession() as session:
+            chunks = job._iter_content(session, job._jobs[0], deadline, 1, True)
+            try:
+                async for chunk in chunks:
+                    pending += decoder.decode(chunk)
+                    while "\n" in pending:
+                        line, pending = pending.split("\n", 1)
+                        yield line.rstrip("\r")
+                pending += decoder.decode(b"", final=True)
+                if pending:
+                    yield pending.rstrip("\r")
+            finally:
+                await chunks.aclose()
 
     async def fetch_samples_data(self):
         """Fetch sample data from the samples endpoint.
