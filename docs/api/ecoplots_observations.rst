@@ -30,6 +30,34 @@ for analysis.
 
 .. currentmodule:: terndata.ecoplots.ecoplots
 
+Search and mode help
+--------------------
+
+.. automethod:: EcoPlots.search
+   :no-index:
+
+.. automethod:: EcoPlots.help
+   :no-index:
+
+.. code-block:: python
+
+   ec.help()
+   suggestions = ec.search("biomass")
+   choices = suggestions[suggestions["selectable"]]
+   if not choices.empty:
+       ec.select(choices.iloc[0]["filters"])
+
+Search uses the current mode automatically. Existing selections do not
+restrict search suggestions.
+Search and help are synchronous on both client classes.
+
+The returned table includes ``label``, ``match_type``, ``facet``, ``value``,
+``filters``, ``selectable`` and ``note``. Result-value suggestions resolve to the
+parent observed property, including its other result values. Regions include
+both their value and required region type. Unsupported suggestions remain visible
+with ``selectable=False``. Searching does not change the current selection.
+
+
 ----
 
 Creating the Client
@@ -77,6 +105,38 @@ discovery method you can call to see valid values for it.
      - str / list
      - Specific site-visit identifiers.
      - ``get_site_visit_attributes()``
+   * - ``platform_type``
+     - str / list
+     - Platform type labels or URIs.
+     - ``get_platform_types()``
+   * - ``platform_instance``
+     - str / list
+     - Individual platform labels or URIs.
+     - ``get_platform_instances()``
+   * - ``platform_deployment``
+     - str / list
+     - Deployment labels or URIs associated with platforms.
+     - ``get_platform_deployments()``
+   * - ``instrument_type``
+     - str / list
+     - Instrument (system) type labels or URIs.
+     - ``get_instrument_types()``
+   * - ``instrument_deployment``
+     - str / list
+     - Deployment labels or URIs associated with instruments.
+     - ``get_instrument_deployments()``
+   * - ``platform``
+     - str / list
+     - Platform label(s) or URI(s).
+     - ``get_platforms()``
+   * - ``deployment``
+     - str / list
+     - Deployment label(s) or URI(s).
+     - ``get_deployments()``
+   * - ``instrument``
+     - str / list
+     - Instrument label(s) or URI(s).
+     - ``get_instruments()``
    * - ``region_type``
      - str
      - Category of geographic region (e.g. ``"bioregions"``, ``"states"``).
@@ -169,6 +229,55 @@ Sites
    ec.get_sites(include_region=True)
    ec.get_site_attributes_data()
    ec.get_site_visit_attributes_data()
+
+Platforms, Deployments & Instruments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automethod:: EcoPlots.get_platform_types
+   :no-index:
+
+.. automethod:: EcoPlots.get_platform_instances
+   :no-index:
+
+.. automethod:: EcoPlots.get_platform_deployments
+   :no-index:
+
+.. automethod:: EcoPlots.get_instrument_types
+   :no-index:
+
+.. automethod:: EcoPlots.get_instrument_deployments
+   :no-index:
+
+.. automethod:: EcoPlots.get_platforms
+   :no-index:
+
+.. automethod:: EcoPlots.get_deployments
+   :no-index:
+
+.. automethod:: EcoPlots.get_instruments
+   :no-index:
+
+.. code-block:: python
+
+   platform_types = ec.get_platform_types()
+   ec.select(platform_type=platform_types.iloc[0]["uri"])
+   platforms = ec.get_platform_instances()
+   ec.select(platform_instance=platforms.iloc[0]["uri"])
+   deployments = ec.get_platform_deployments()
+   instrument_types = ec.discover("instrument_type")
+   ec.select(instrument={"type": instrument_types.iloc[0]["uri"]})
+   ec.remove(platform={"type": None})  # retains other selected subfacets
+
+Flat and grouped equipment filters can be mixed. Values in each subfacet are
+ORed; different subfacets and groups are ANDed. Unsupported grouped subfacets
+are ignored. The client sends grouped URI selections to the API and preserves
+those selections when saving and loading projects. Discovery respects current
+filters except the requested subfacet's own selection.
+
+``get_platforms()`` is an alias for ``get_platform_instances()``. Existing scalar
+``platform``, ``deployment``, and ``instrument`` filters and legacy identifier
+discovery methods remain supported. System IDs remain available as references;
+instrument subfacets consist of type and deployment.
 
 Regions
 ~~~~~~~
@@ -370,3 +479,18 @@ reproduce or share the exact query later.
    # Reload later
    ec2 = EcoPlots.load(path)
    ec2.get_filter()   # filters are fully restored
+
+Species discovery
+-----------------
+
+``get_speciesname()`` and ``discover("speciesname")`` return species names and
+counts in either mode. Names can be passed directly to ``select(speciesname=...)``.
+The current selections and sample image filter are preserved. Discovery uses
+``/ui/facet`` for observations and ``/ui/facet/samples`` for samples, with
+``facet=speciesname``. Results are limited to the API's returned buckets.
+
+Scientific and accepted-name search suggestions also supply species filters.
+Use ``search("Acacia")`` in either mode, including after selecting species.
+
+.. automethod:: EcoPlots.get_speciesname
+   :no-index:

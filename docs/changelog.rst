@@ -3,15 +3,20 @@ Change Log
 
 Changes over time for the EcoPlots Python library.
 
-v1.2.0 (2026-11-06)
+v1.2.0 (2026-11-25)
 -------------------
 
+- Added Platform, Deployment, and Instrument filters and discovery, with cached vocabulary labels.
 - Replaced the spatial selector basemap with Esri Light Gray Canvas for a minimal, muted view without an API key.
 - Restricted spatial map navigation to Australia and reduced attribution clutter.
 - Added ``cite()`` for references matching the current filters, including versioned software attribution and RIS export.
 - Updated sync and async ``get_data()`` for the job-based data API, with automatic polling and retrieval. Existing usage and output formats are unchanged.
 - Added ``submit_data_job(dformat="csv")`` with status, streaming, and download access. CSV feature-type requests are managed internally; GeoJSON uses a single job.
 - Moved blocking discovery and result conversion off the event loop during async observation retrieval, and made async file export non-blocking.
+- Added mode-aware search suggestions with explicit selection dictionaries.
+- Added ``help()`` method listings tailored to observations or samples.
+- Switched sample retrieval to the flat CSV export endpoint, preserving image
+  arrays and coordinates while retrieving all matching samples.
 
 v1.1.1 (2026-06-26)
 -------------------

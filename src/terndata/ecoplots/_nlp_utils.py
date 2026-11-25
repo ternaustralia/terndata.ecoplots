@@ -3,12 +3,18 @@ import re
 import sys
 import warnings
 from typing import Optional
+from urllib.parse import urlsplit
 
 from rapidfuzz import fuzz, process
 
+from ._config import (
+    FACET_ALIASES,
+    FACET_VOCAB_NAMES,
+    MATERIAL_SAMPLE_TYPE_MAP,
+    VOCAB_FACETS,
+)
 from ._exceptions import EcoPlotsError
 from ._utils import _get_cached_labels
-from ._config import MATERIAL_SAMPLE_TYPE_MAP
 
 ALL_FACETS = ["region_type", "region", "dataset", "feature_type", "observed_property"]
 
@@ -66,6 +72,7 @@ def resolve_facet(user_input: str, allowed_facets: list, threshold: int = 70) ->
     """
     # Normalize user input
     cleaned_input = user_input.strip().replace(" ", "_").lower()
+    cleaned_input = FACET_ALIASES.get(cleaned_input, cleaned_input)
     result = process.extractOne(cleaned_input, allowed_facets, scorer=fuzz.QRatio)  # type: ignore
     if result is None:
         return None
@@ -320,14 +327,33 @@ def validate_facet(facet, value) -> tuple:
             - corrected (list): List of corrected values, if any corrections were applied.
 
     Raises:
-        None
+        KeyError: The facet vocabulary is unavailable in the label cache.
 
     """
     # Special handling for material_sample_type: use in-memory map instead of cache
     if facet == "material_sample_type":
         labels_dict = MATERIAL_SAMPLE_TYPE_MAP
     else:
-        labels_dict = _get_cached_labels(facet if facet != "project" else "dataset")
+        user_values = list(value) if isinstance(value, (list, tuple)) else [value]
+        canonical_uris = {}
+        if facet in VOCAB_FACETS or facet in FACET_VOCAB_NAMES or facet == "project":
+            for candidate in user_values:
+                if not isinstance(candidate, str):
+                    continue
+                candidate = candidate.strip()
+                parsed = urlsplit(candidate)
+                if (parsed.scheme in {"http", "https"} and parsed.netloc) or (
+                    parsed.scheme == "urn" and parsed.path
+                ):
+                    canonical_uris[candidate] = candidate
+        try:
+            labels_dict = _get_cached_labels(facet if facet != "project" else "dataset")
+        except KeyError:
+            if not user_values or not all(candidate in canonical_uris for candidate in user_values):
+                raise
+            labels_dict = {}
+        # A discovery URI can be valid even when its vocabulary label is absent.
+        labels_dict = {**canonical_uris, **labels_dict}
 
     user_values = list(value) if isinstance(value, (list, tuple)) else [value]
     urls, matched, unmatched, corrected = resolve_filter_values_to_urls(

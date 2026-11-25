@@ -53,11 +53,13 @@ from ._citations import (
 from ._config import CACHE_DIR, MATERIAL_SAMPLE_TYPE_MAP
 from ._exceptions import EcoPlotsError
 from ._jobs import AsyncDataJob, DataJob, submit_jobs
+from ._search import search_suggestions
 from ._utils import (
     _align_and_concat,
     _run_sync,
     _to_geopandas,
 )
+from ._vocab_cache import wait_for_vocabularies
 
 _TABLE_FORMATS = ("pandas", "geopandas", "pd", "gpd", "parquet", "pq")
 _VECTOR_FILE_SUFFIXES = {".gpkg", ".shp", ".fgb"}
@@ -250,6 +252,105 @@ class EcoPlots(EcoPlotsBase):
 
         super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
+    def search(self, text: str, *, limit: int = 10):
+        """Find suggestions that can be applied explicitly with select().
+
+        Searches the current observations or samples mode independently of
+        existing selections.
+        Search leaves the current selection unchanged. Discovery methods,
+        including this method, are synchronous on both client classes.
+
+        Args:
+            text: Search phrase of at most 256 characters.
+            limit: Maximum number of suggestions, from 1 to 99.
+
+        Returns:
+            A DataFrame with label, match_type, facet, value, filters, selectable,
+            and note columns. Apply a selectable row using
+            ``ec.select(row["filters"])``. Result-value matches select their parent
+            observed property, including its other result values.
+        """
+        return search_suggestions(self._base_url, self._mode, text, limit)
+
+    def help(self) -> pd.DataFrame:
+        """List public user methods and brief descriptions for the current mode.
+
+        Returns:
+            A DataFrame containing method signatures and descriptions. Internal
+            transport helpers and methods exclusive to the other mode are omitted.
+            Awaitable methods on AsyncEcoPlots are marked with ``await``.
+        """
+        import inspect
+
+        common = [
+            "search",
+            "help",
+            "discover",
+            "select",
+            "remove",
+            "clear",
+            "from_date",
+            "to_date",
+            "get_filter",
+            "get_api_query_filters",
+            "get_datasources",
+            "get_sites",
+            "get_region_types",
+            "get_regions",
+            "get_used_procedures",
+            "get_speciesname",
+            "summary",
+            "preview",
+            "get_data",
+            "export_data",
+            "cite",
+            "select_spatial",
+            "save",
+            "load",
+        ]
+        observations = [
+            "get_datasources_attributes",
+            "get_site_attributes",
+            "get_sites_attributes",
+            "get_site_attributes_data",
+            "get_site_visit_attributes",
+            "get_site_visit_attributes_data",
+            "get_feature_types",
+            "get_observed_properties",
+            "get_observation_attributes",
+            "get_platform_types",
+            "get_platform_instances",
+            "get_platform_deployments",
+            "get_instrument_types",
+            "get_instrument_deployments",
+            "get_platforms",
+            "get_deployments",
+            "get_instruments",
+            "submit_data_job",
+        ]
+        samples = [
+            "get_material_sample_types",
+            "get_sample_igsn",
+            "view_sample_igsn",
+            "get_soil_depth_range",
+            "get_soilpit",
+            "view_sample_images",
+        ]
+        names = common + (samples if self._mode == "samples" else observations)
+        if hasattr(self, "get_data_stream"):
+            names.append("get_data_stream")
+        rows = []
+        for name in names:
+            method = getattr(self, name)
+            prefix = "await " if inspect.iscoroutinefunction(method) else ""
+            rows.append(
+                {
+                    "method": prefix + name + str(inspect.signature(method)),
+                    "description": (inspect.getdoc(method) or "").split("\n")[0],
+                }
+            )
+        return pd.DataFrame(rows, columns=["method", "description"])
+
     def summary(self, dformat: Optional[str] = None) -> Union[pd.DataFrame, str]:
         """Summarize the EcoPlots data.
 
@@ -291,6 +392,9 @@ class EcoPlots(EcoPlotsBase):
 
         Returns:
             A pandas DataFrame containing discovered values.
+
+        Raises:
+            EcoPlotsError: If the facet or required discovery arguments are invalid.
         """
         normalized = facet.strip().lower().replace("-", "_").replace(" ", "_")
         method_names = {
@@ -316,6 +420,26 @@ class EcoPlots(EcoPlotsBase):
             "feature_types": "get_feature_types",
             "observed_property": "get_observed_properties",
             "observed_properties": "get_observed_properties",
+            "platform_type": "get_platform_types",
+            "platform_types": "get_platform_types",
+            "platform_instance": "get_platform_instances",
+            "platform_instances": "get_platform_instances",
+            "platform_deployment": "get_platform_deployments",
+            "platform_deployments": "get_platform_deployments",
+            "instrument_type": "get_instrument_types",
+            "instrument_types": "get_instrument_types",
+            "system_type": "get_instrument_types",
+            "instrument_deployment": "get_instrument_deployments",
+            "instrument_deployments": "get_instrument_deployments",
+            "platform": "get_platforms",
+            "platforms": "get_platforms",
+            "platform_id": "get_platforms",
+            "deployment": "get_deployments",
+            "deployments": "get_deployments",
+            "deployment_id": "get_deployments",
+            "instrument": "get_instruments",
+            "instruments": "get_instruments",
+            "system_id": "get_instruments",
             "used_procedure": "get_used_procedures",
             "used_procedures": "get_used_procedures",
             "observation_attributes": "get_observation_attributes",
@@ -375,8 +499,7 @@ class EcoPlots(EcoPlotsBase):
             return samples_gdf
 
         if dformat in ("geojson", "json"):
-            geojson_data = self.fetch_data_sync(page_number=1, page_size=10)
-            return geojson_data
+            return self.fetch_data_sync(page_number=1, page_size=10)
 
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
             raise EcoPlotsError(
@@ -461,6 +584,9 @@ class EcoPlots(EcoPlotsBase):
 
         Returns:
             A DataFrame containing the data sources.
+
+        Raises:
+            EcoPlotsError: If the current mode is unsupported.
         """
         if self._mode == "observations":
             data = super().discover("dataset")
@@ -481,6 +607,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("dataset")
         uris = data.get("dataset_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             ds_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -550,6 +677,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("site")
         uris = data.get("site_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             site_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -596,6 +724,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("site_visit")
         uris = data.get("site_visit_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             sv_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -675,6 +804,50 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover("observed_property")
         return pd.DataFrame(data)
 
+    def get_platform_types(self) -> pd.DataFrame:
+        """Discover platform types matching the current observation filters."""
+        return pd.DataFrame(super().discover("platform_type"))
+
+    def get_platform_instances(self) -> pd.DataFrame:
+        """Discover individual platforms matching the current observation filters."""
+        return pd.DataFrame(super().discover("platform_instance"))
+
+    def get_platform_deployments(self) -> pd.DataFrame:
+        """Discover deployments associated with the selected platforms."""
+        return pd.DataFrame(super().discover("platform_deployment"))
+
+    def get_instrument_types(self) -> pd.DataFrame:
+        """Discover instrument types matching the current observation filters."""
+        return pd.DataFrame(super().discover("instrument_type"))
+
+    def get_instrument_deployments(self) -> pd.DataFrame:
+        """Discover deployments associated with the selected instrument types."""
+        return pd.DataFrame(super().discover("instrument_deployment"))
+
+    def get_platforms(self) -> pd.DataFrame:
+        """Get the platforms available for the current observation filters.
+
+        Returns:
+            A DataFrame containing the platforms.
+        """
+        return self.get_platform_instances()
+
+    def get_deployments(self) -> pd.DataFrame:
+        """Get the deployments available for the current observation filters.
+
+        Returns:
+            A DataFrame containing the deployments.
+        """
+        return pd.DataFrame(super().discover("deployment"))
+
+    def get_instruments(self) -> pd.DataFrame:
+        """Get the instruments available for the current observation filters.
+
+        Returns:
+            A DataFrame containing the instruments.
+        """
+        return pd.DataFrame(super().discover("instrument"))
+
     def get_used_procedures(self) -> pd.DataFrame:
         """Get the used procedures available for the current filters.
 
@@ -691,6 +864,7 @@ class EcoPlots(EcoPlotsBase):
 
     def get_observation_attributes(self) -> pd.DataFrame:
         """Get the attributes of observations from the applied filters.
+
         Available only in "observations" mode.
 
         Returns:
@@ -705,6 +879,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("observation")
         uris = data.get("observation_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             obs_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -718,6 +893,7 @@ class EcoPlots(EcoPlotsBase):
 
     def get_material_sample_types(self) -> pd.DataFrame:
         """Get the material sample types from the applied filters.
+
         Available only in "samples" mode.
 
         Returns:
@@ -851,27 +1027,15 @@ class EcoPlots(EcoPlotsBase):
         return cast(pd.DataFrame, self.discover_soilpit())
 
     def get_speciesname(self) -> pd.DataFrame:
-        """Get species name distribution for the current filters.
+        """Discover species names and counts in observations or samples mode.
 
-        Available only in "samples" mode.
-
-        This method preserves all current query filters, including ``has_image``.
+        Uses current selections, including has_image in samples mode. Names are
+        literal strings and can be passed to ``select(speciesname=...)``.
+        Facet results are limited to the buckets returned by the API.
 
         Returns:
-            A DataFrame with two columns: ``speciesname`` and ``count``.
-
-        Raises:
-            EcoPlotsError: If called in a mode other than "samples".
-            EcoPlotsError: If none of the required material sample types are selected.
+            A DataFrame with ``speciesname`` and ``count`` columns.
         """
-        if self._mode != "samples":
-            raise EcoPlotsError("Species distribution is only available in 'samples' mode.")
-
-        self._ensure_required_material_sample_types(
-            ["Plant Tissue Sample", "Plant Voucher Specimen"],
-            "Species distribution",
-        )
-
         return cast(pd.DataFrame, self.discover_species())
 
     def _data_job_payloads(self, dformat, query):
@@ -1075,6 +1239,10 @@ class EcoPlots(EcoPlotsBase):
 
         Returns:
             ipywidgets.VBox: Interactive viewer widget.
+
+        Raises:
+            EcoPlotsError: If fetching images without samples mode, an image filter,
+                or the plant voucher specimen material sample type.
         """
         from ._gui import sample_image_viewer
 
@@ -1106,6 +1274,9 @@ class EcoPlots(EcoPlotsBase):
 
         if not isinstance(data, pd.DataFrame):
             data = pd.DataFrame(data)
+
+        if image_column == "sample_images" and image_column not in data.columns:
+            image_column = "sample_image_urls"
 
         return sample_image_viewer(
             data,
@@ -1257,6 +1428,10 @@ class AsyncEcoPlots(EcoPlots):
             GeoJSON lines, GeoDataFrames, or parquet bytes depending on
             ``dformat``.
 
+        Raises:
+            EcoPlotsError: If the streaming format is unsupported.
+            RuntimeError: If downloading without filters is not explicitly allowed.
+
         Examples:
             .. code-block:: python
 
@@ -1275,7 +1450,7 @@ class AsyncEcoPlots(EcoPlots):
         if self._mode == "samples":
             if dformat in ("geojson", "json"):
                 raise EcoPlotsError(
-                    "In 'samples' mode, streaming supports 'geopandas'/'gpd' " "and 'parquet'/'pq'."
+                    "In 'samples' mode, streaming supports 'geopandas'/'gpd' and 'parquet'/'pq'."
                 )
             data = await self.get_data(
                 allow_full_download=allow_full_download,

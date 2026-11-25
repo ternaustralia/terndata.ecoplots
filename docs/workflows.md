@@ -114,6 +114,9 @@ Accepted formats (examples): `"21/05/2020"`, `"21-05-2020"`, `"21st May 2020"`, 
 | `dataset` | e.g. `"TERN Ecosystem Surveillance"` |
 | `site_id` | e.g. `"TCFTNS0002"` |
 | `site_visit_id` | Site visit identifier |
+| `platform` | Platform labels or URIs |
+| `deployment` | Deployment labels or URIs |
+| `instrument` | Instrument labels or URIs |
 | `feature_type` | e.g. `"soil profile"`, `"plant occurrence"` |
 | `observed_property` | e.g. `"soil pH"` |
 | `spatial` | WKT string or GeoJSON geometry dict |
@@ -129,6 +132,9 @@ ec.get_sites(include_region=True)  # sites with region columns
 ec.get_region_types()           # available region types
 ec.get_regions("States and Territories")   # regions for a type
 ec.get_feature_types()          # available feature types
+ec.get_platforms()              # available platforms
+ec.get_deployments()            # available deployments
+ec.get_instruments()            # available instruments
 ec.get_observed_properties()    # available observed properties
 ec.get_used_procedures()        # available used procedures
 
@@ -450,6 +456,9 @@ ec2 = AsyncEcoPlots.load("plant_vouchers_qld.ecoproj")
 | `get_region_types()` | ✓ | ✓ | |
 | `get_regions()` | ✓ | ✓ | |
 | `get_feature_types()` | ✓ | — | |
+| `get_platforms()` | ✓ | — | |
+| `get_deployments()` | ✓ | — | |
+| `get_instruments()` | ✓ | — | |
 | `get_observed_properties()` | ✓ | — | |
 | `get_used_procedures()` | ✓ | ✓ | |
 | `get_observation_attributes()` | ✓ | — | |
@@ -467,3 +476,33 @@ ec2 = AsyncEcoPlots.load("plant_vouchers_qld.ecoproj")
 | `view_sample_images()` | — | ✓ | |
 | `select_spatial()` | ✓ | ✓ | Notebook widget |
 | `save()` / `load()` | ✓ | ✓ | `.ecoproj` binary format |
+
+## Search before selecting
+
+Use `ec.search("biomass")` to discover applicable filters in the current mode.
+Inspect `selectable`, `facet`, and `note`, then pass a chosen row's `filters`
+to `ec.select()`. Search uses the current mode independently of existing selections. Result-value matches select their
+parent observed property and include other values. `ec.help()` lists the
+methods available in the current mode with a short description of each.
+
+## Species discovery and selection
+
+```python
+species = ec.get_speciesname()  # speciesname and count columns; either mode
+species = ec.discover("speciesname")
+if not species.empty:
+    ec.select(speciesname=species.iloc[0]["speciesname"])
+
+suggestions = ec.search("Acacia")
+choices = suggestions[suggestions["selectable"]]
+if not choices.empty:
+    ec.select(choices.iloc[0]["filters"])
+```
+
+Species are literal names rather than vocabulary URIs. Discovery uses
+`/ui/facet?facet=speciesname` in observations mode and
+`/ui/facet/samples?facet=speciesname` in samples mode, preserving current filters
+and sample image filtering. No material sample type is required for discovery.
+Results contain the species buckets returned by the API.
+Scientific and accepted-name search suggestions resolve to `speciesname` filters
+in either mode, including when species filters are already selected.

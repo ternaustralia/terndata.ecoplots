@@ -127,6 +127,49 @@ Samples mode includes two dedicated notebook widgets:
 > **Note:** In samples mode the *TERN Ecosystem Surveillance* dataset is applied
 > automatically and cannot be removed.
 
+---
+
+## Find filters with search
+
+Search for a concept, inspect the suggestions, then select the relevant row:
+
+```python
+from terndata.ecoplots import EcoPlots
+
+ec = EcoPlots()  # observations mode
+suggestions = ec.search("above ground biomass")
+choices = suggestions[suggestions["selectable"]]
+if not choices.empty:
+    ec.select(choices.iloc[0]["filters"])
+
+ec.help()  # methods and short descriptions for the current mode
+```
+
+Search automatically uses the client's observations or samples mode.
+Existing selections do not restrict search suggestions. Searching never changes selections. A result-value match
+selects its **observed property**, which includes other result values, rather
+than filtering to the matched value itself. Inspect `facet`, `filters`, and
+`note` before selecting. Rows with `selectable=False` cannot be applied.
+
+
+## Species discovery and selection
+
+```python
+species = ec.get_speciesname()  # speciesname and count columns; either mode
+species = ec.discover("speciesname")
+if not species.empty:
+    ec.select(speciesname=species.iloc[0]["speciesname"])
+
+suggestions = ec.search("Acacia")
+choices = suggestions[suggestions["selectable"]]
+if not choices.empty:
+    ec.select(choices.iloc[0]["filters"])
+```
+
+Species are literal names rather than vocabulary URIs.
+Scientific and accepted-name search suggestions resolve to `speciesname` filters
+in either mode, including when species filters are already selected.
+
 ### Async client (`AsyncEcoPlots`)
 
 For async/ASGI services or concurrent I/O pipelines, install the async extra and use `AsyncEcoPlots` — it has the same interface as `EcoPlots` with `await`-able retrieval methods. Both modes and all filters are supported.
@@ -142,7 +185,7 @@ async for chunk in ec.get_data_stream(dformat="gpd"):
     ...
 ```
 
-### Data jobs (observations)
+## Data jobs (observations)
 
 `get_data()` handles job submission, polling, and retrieval automatically. To submit work and retrieve it later, use `submit_data_job(dformat="csv")` or `dformat="geojson"`:
 
@@ -171,7 +214,7 @@ async for frame in job.stream():
     ...
 ```
 
-CSV streaming yields a DataFrame per feature type; GeoJSON streaming yields bytes. CSV downloads combine all results into one file. Job methods accept `timeout` and `poll_interval` in seconds.
+CSV streaming yields a DataFrame per feature type; GeoJSON streaming yields bytes. CSV downloads combine all results into one file.
 
 ---
 
@@ -245,7 +288,7 @@ ec.cite(path="references.ris")  # Save for EndNote and other reference managers
 ```
 
 Use `dformat="ris"` to return RIS text, or save to `.txt` for readable text.
-The software citation credits Avinash Chandra, with TERN Data Services and
+The software citation credits authors, with TERN Data Services and
 Analytics affiliation, as recorded in [`CITATION.cff`](CITATION.cff), and includes
 the installed package version.
 
