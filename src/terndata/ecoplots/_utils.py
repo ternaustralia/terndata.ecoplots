@@ -7,14 +7,12 @@ from typing import Any, Optional, TypeVar
 
 import diskcache
 import geopandas as gpd
-import orjson
 import pandas as pd
 
 from ._config import (
-    API_BASE_URL,
     CACHE_DIR,
-    CACHE_EXPIRE_SECONDS,
-    VOCAB_FACETS,
+    FACET_ALIASES,
+    FACET_VOCAB_NAMES,
 )
 from ._exceptions import EcoPlotsError
 
@@ -73,90 +71,13 @@ def _parse_date(date_input: str) -> str:
 
     try:
         dt = _dateutil_parser.parse(cleaned, dayfirst=True)
-    except (ValueError, OverflowError):
+    except (ValueError, OverflowError) as exc:
         raise EcoPlotsError(
             f"Cannot parse date {date_input!r}. Use a recognisable format such as "
             "'DD/MM/YYYY', '21 May 2020', '21st May 2020', or 'YYYY-MM-DD'."
-        )
+        ) from exc
 
     return dt.strftime("%Y-%m-%d")
-
-
-async def _get_single_label(facet: str) -> dict[str, str]:
-    """Fetch labels for a single facet from the API.
-
-    Performs an asynchronous GET request and returns the label payload for the
-    requested facet.
-
-    Args:
-        facet: Facet name to fetch labels for.
-
-    Returns:
-        Labels associated with the facet as returned by the API.
-
-    Notes:
-        - Performs network I/O
-        - Intended for internal use only.
-    """
-    import aiohttp
-
-    url = f"{API_BASE_URL}/api/v1.0/data/label/{facet}"
-    timeout = aiohttp.ClientTimeout(total=60, sock_read=60, sock_connect=10)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=timeout) as resp:
-            resp.raise_for_status()
-            result = await resp.json(loads=orjson.loads)
-            return result[facet]
-
-
-async def _cache_labels() -> dict:
-    """Fetch and cache labels for all known facets.
-
-    Uses `asyncio.gather` to load labels concurrently and stores each facet's
-    labels in the on-disk cache with an expiration.
-
-    Returns:
-        A mapping of facet to labels for all fetched facets.
-
-    Notes:
-        - Performs network I/O and disk writes
-        - Intended for internal use only.
-    """
-    cache = diskcache.Cache(CACHE_DIR)
-    try:
-
-        async def fetch_and_cache(facet):
-            # Only fetch if cache is missing or expired
-            # Check if cache exists and is not expired
-            if cache.get(facet, default=None, read=True) is not None:
-                # print(f"Using cached labels for facet: {facet}")
-                return facet, cache[facet]
-            labels = await _get_single_label(facet)
-            cache.set(facet, labels, expire=CACHE_EXPIRE_SECONDS)
-            return facet, labels
-
-        tasks = [fetch_and_cache(facet) for facet in VOCAB_FACETS]
-        results = await asyncio.gather(*tasks)
-        return dict(results)
-    finally:
-        cache.close()
-
-
-def _background_cache_loader() -> None:
-    """Run the asynchronous `_cache_labels` coroutine using `asyncio.run`.
-
-    It is intended to be executed periodically to refresh the cache of labels.
-
-    Notes:
-        - This function is intended to be run in the background.
-        - Intended for internal use only.
-    """
-    try:
-        asyncio.run(_cache_labels())
-    except Exception:
-        # Cache warming is optional; imports must remain usable offline or when
-        # the EcoPlots API is temporarily unavailable.
-        return
 
 
 def _run_sync(coro: Coroutine[Any, Any, _T]) -> _T:
@@ -208,9 +129,14 @@ def _get_cached_labels(facet: Optional[str] = None) -> dict:
     Notes:
         - Intended for internal use only.
     """
+    from ._vocab_cache import wait_for_vocabularies
+
+    wait_for_vocabularies()
     cache = diskcache.Cache(CACHE_DIR)
     try:
         if facet:
+            facet = FACET_ALIASES.get(facet, facet)
+            facet = FACET_VOCAB_NAMES.get(facet, facet)
             labels = cache.get(facet)
             if labels is None:
                 raise KeyError(f"No cached labels found for facet: {facet}")
@@ -395,14 +321,18 @@ def _align_and_concat(dfs: list[pd.DataFrame]) -> pd.DataFrame:
                 all_cols.append(c)
     aligned = [df.reindex(columns=all_cols) for df in dfs]
     out = pd.concat(aligned, ignore_index=True)
-    return out.fillna("N/A")
+    for column in out.columns:
+        values = out[column]
+        if values.isna().any():
+            out[column] = values.astype(object).where(values.notna(), "N/A")
+    return out
 
 
 def _to_geopandas(df: pd.DataFrame) -> gpd.GeoDataFrame:
     """Convert a DataFrame to a GeoDataFrame if possible.
 
-    If the DataFrame contains 'longitude_Degree' and 'latitude_Degree' columns,
-    these are used to create Point geometries. If not, a GeoDataFrame with
+    Coordinates from 'longitude'/'latitude' (samples) or
+    'longitude_Degree'/'latitude_Degree' (observations) create Point geometries. If not, a GeoDataFrame with
     null geometries is returned.
 
     Args:
@@ -415,12 +345,15 @@ def _to_geopandas(df: pd.DataFrame) -> gpd.GeoDataFrame:
     Notes:
         - Intended for internal use only.
     """
-    if {"longitude_Degree", "latitude_Degree"} <= set(df.columns):
+    longitude, latitude = "longitude_Degree", "latitude_Degree"
+    if {"longitude", "latitude"} <= set(df.columns):
+        longitude, latitude = "longitude", "latitude"
+    if {longitude, latitude} <= set(df.columns):
         return gpd.GeoDataFrame(
             df,
             geometry=gpd.points_from_xy(
-                pd.to_numeric(df["longitude_Degree"], errors="coerce"),
-                pd.to_numeric(df["latitude_Degree"], errors="coerce"),
+                pd.to_numeric(df[longitude], errors="coerce"),
+                pd.to_numeric(df[latitude], errors="coerce"),
                 crs="EPSG:4326",
             ),
         )

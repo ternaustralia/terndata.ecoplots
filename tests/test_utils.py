@@ -22,7 +22,7 @@ from terndata.ecoplots._utils import (
     ],
 )
 def test_resolve_region_type_accepts_ibra7_bioregion_aliases(raw):
-    assert resolve_region_type(raw) == "ibra7-bioregions"
+    assert resolve_region_type(raw) == "IBRA7 Bioregions"
 
 
 @pytest.mark.parametrize(
@@ -35,7 +35,7 @@ def test_resolve_region_type_accepts_ibra7_bioregion_aliases(raw):
     ],
 )
 def test_resolve_region_type_accepts_ibra7_subregion_aliases(raw):
-    assert resolve_region_type(raw) == "ibra7-subregions"
+    assert resolve_region_type(raw) == "IBRA7 Subregions"
 
 
 @pytest.mark.parametrize(

@@ -37,6 +37,34 @@ such as IGSN identifiers and sample images.
 
 .. currentmodule:: terndata.ecoplots.ecoplots
 
+Search and mode help
+--------------------
+
+.. automethod:: EcoPlots.search
+   :no-index:
+
+.. automethod:: EcoPlots.help
+   :no-index:
+
+.. code-block:: python
+
+   ec.help()
+   suggestions = ec.search("biomass")
+   choices = suggestions[suggestions["selectable"]]
+   if not choices.empty:
+       ec.select(choices.iloc[0]["filters"])
+
+Search uses the current mode automatically. Existing selections do not
+restrict search suggestions.
+Search and help are synchronous on both client classes.
+
+The returned table includes ``label``, ``match_type``, ``facet``, ``value``,
+``filters``, ``selectable`` and ``note``. Result-value suggestions resolve to the
+parent observed property, including its other result values. Regions include
+both their value and required region type. Unsupported suggestions remain visible
+with ``selectable=False``. Searching does not change the current selection.
+
+
 ----
 
 Creating the Client
@@ -195,7 +223,7 @@ Species Names
 .. automethod:: EcoPlots.get_speciesname
    :no-index:
 
-**Example** (*requires Plant Tissue Sample or Plant Voucher Specimen selected*)
+**Example** (optionally restrict to a material sample type)
 
 .. code-block:: python
 
@@ -463,3 +491,24 @@ Project Save / Load
    # Reload — mode and all filters are fully restored
    ec2 = EcoPlots.load(path)
    ec2.get_filter()
+
+Sample CSV retrieval
+--------------------
+
+``get_data()`` and ``export_data()`` retrieve flat records from ``/data/samples``
+with ``dformat=csv``. Select exactly one material sample type first. Omitting
+pagination retrieves all matching samples. CSV image and related IGSN arrays
+are decoded to lists; latitude and longitude supply GeoDataFrame geometry.
+The image viewer accepts the exported ``sample_image_urls`` column.
+
+Species discovery
+-----------------
+
+``get_speciesname()`` and ``discover("speciesname")`` return species names and
+counts in either mode. Names can be passed directly to ``select(speciesname=...)``.
+The current selections and sample image filter are preserved. Discovery uses
+``/ui/facet`` for observations and ``/ui/facet/samples`` for samples, with
+``facet=speciesname``. Results are limited to the API's returned buckets.
+
+Scientific and accepted-name search suggestions also supply species filters.
+Use ``search("Acacia")`` in either mode, including after selecting species.

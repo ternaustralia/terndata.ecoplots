@@ -16,6 +16,8 @@ Install with:
 In practice, most methods are used the same way as the synchronous client.
 The key difference is that you use ``await`` for ``get_data()`` and can use
 ``get_data_stream()`` to consume GeoDataFrame or Parquet chunks as they arrive.
+Observation retrieval handles job submission and polling automatically. Use
+``ec.submit_data_job()`` to retrieve results later; see :doc:`data_jobs`.
 
 Constructor Parameters
 ----------------------

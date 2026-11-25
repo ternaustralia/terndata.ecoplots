@@ -13,7 +13,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import pandas as pd
-from ipywidgets import Dropdown, HTML, Layout, VBox
+from ipywidgets import HTML, Dropdown, Layout, VBox
 
 
 def _as_data_uri(binary: bytes, mime: str) -> str:
@@ -24,6 +24,9 @@ def _normalize_igsn_input(igsn: str) -> Optional[str]:
     """Normalize user input into an IGSN identifier (e.g. 10.60792/abc-123).
 
     Accepts bare identifiers and DOI URLs/hosts.
+
+    Args:
+        igsn: Bare identifier or DOI URL to normalize.
     """
     value = (igsn or "").strip()
     if not value:
@@ -81,7 +84,8 @@ def igsn_viewer(df: pd.DataFrame, iframe_height: str = "640px", igsn: Optional[s
             "<div style='position:absolute; right:2px; bottom:2px; display:flex; align-items:center; "
             "gap:3px; color:#000; font-size:10px; font-weight:500;'>"
             "<span style='font-size:10px;'>Powered by</span>"
-            f"<img src='{ecoplots_logo_uri}' style='height:12px; margin-bottom:2px; filter:{ecoplots_svg_filter};'/>"
+            f"<img src='{ecoplots_logo_uri}' "
+            f"style='height:12px; margin-bottom:2px; filter:{ecoplots_svg_filter};'/>"
             "<span style='color:#f8c59d; margin-left:1px;'>EcoPlots</span>"
             "</div>"
             "</div>"

@@ -34,6 +34,7 @@ Examples:
 """
 
 import asyncio
+import copy
 import io
 from pathlib import Path
 from typing import Optional, Union, cast
@@ -44,13 +45,21 @@ import pandas as pd
 from diskcache import Cache
 
 from ._base import EcoPlotsBase
+from ._citations import (
+    _citation_format,
+    _render_citations,
+    fetch_citations,
+)
 from ._config import CACHE_DIR, MATERIAL_SAMPLE_TYPE_MAP
 from ._exceptions import EcoPlotsError
+from ._jobs import AsyncDataJob, DataJob, submit_jobs
+from ._search import search_suggestions
 from ._utils import (
     _align_and_concat,
     _run_sync,
     _to_geopandas,
 )
+from ._vocab_cache import wait_for_vocabularies
 
 _TABLE_FORMATS = ("pandas", "geopandas", "pd", "gpd", "parquet", "pq")
 _VECTOR_FILE_SUFFIXES = {".gpkg", ".shp", ".fgb"}
@@ -85,6 +94,15 @@ def _csv_bytes_to_dataframe(csv_bytes: bytes) -> pd.DataFrame:
     if not csv_bytes or not csv_bytes.strip():
         return pd.DataFrame()
     return pd.read_csv(io.BytesIO(csv_bytes))
+
+
+def _format_table(df: pd.DataFrame, dformat):
+    """Convert a retrieved table to the requested public format."""
+    if dformat in ("pandas", "pd"):
+        return pd.DataFrame(df)
+    if dformat in ("parquet", "pq"):
+        return _dataframe_to_parquet_bytes(pd.DataFrame(df))
+    return _to_geopandas(df)
 
 
 def _infer_file_dformat(path: Union[str, Path], mode: str) -> str:
@@ -239,6 +257,105 @@ class EcoPlots(EcoPlotsBase):
 
         super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
+    def search(self, text: str, *, limit: int = 10):
+        """Find suggestions that can be applied explicitly with select().
+
+        Searches the current observations or samples mode independently of
+        existing selections.
+        Search leaves the current selection unchanged. Discovery methods,
+        including this method, are synchronous on both client classes.
+
+        Args:
+            text: Search phrase of at most 256 characters.
+            limit: Maximum number of suggestions, from 1 to 99.
+
+        Returns:
+            A DataFrame with label, match_type, facet, value, filters, selectable,
+            and note columns. Apply a selectable row using
+            ``ec.select(row["filters"])``. Result-value matches select their parent
+            observed property, including its other result values.
+        """
+        return search_suggestions(self._base_url, self._mode, text, limit)
+
+    def help(self) -> pd.DataFrame:
+        """List public user methods and brief descriptions for the current mode.
+
+        Returns:
+            A DataFrame containing method signatures and descriptions. Internal
+            transport helpers and methods exclusive to the other mode are omitted.
+            Awaitable methods on AsyncEcoPlots are marked with ``await``.
+        """
+        import inspect
+
+        common = [
+            "search",
+            "help",
+            "discover",
+            "select",
+            "remove",
+            "clear",
+            "from_date",
+            "to_date",
+            "get_filter",
+            "get_api_query_filters",
+            "get_datasources",
+            "get_sites",
+            "get_region_types",
+            "get_regions",
+            "get_used_procedures",
+            "get_speciesname",
+            "summary",
+            "preview",
+            "get_data",
+            "export_data",
+            "cite",
+            "select_spatial",
+            "save",
+            "load",
+        ]
+        observations = [
+            "get_datasources_attributes",
+            "get_site_attributes",
+            "get_sites_attributes",
+            "get_site_attributes_data",
+            "get_site_visit_attributes",
+            "get_site_visit_attributes_data",
+            "get_feature_types",
+            "get_observed_properties",
+            "get_observation_attributes",
+            "get_platform_types",
+            "get_platform_instances",
+            "get_platform_deployments",
+            "get_instrument_types",
+            "get_instrument_deployments",
+            "get_platforms",
+            "get_deployments",
+            "get_instruments",
+            "submit_data_job",
+        ]
+        samples = [
+            "get_material_sample_types",
+            "get_sample_igsn",
+            "view_sample_igsn",
+            "get_soil_depth_range",
+            "get_soilpit",
+            "view_sample_images",
+        ]
+        names = common + (samples if self._mode == "samples" else observations)
+        if hasattr(self, "get_data_stream"):
+            names.append("get_data_stream")
+        rows = []
+        for name in names:
+            method = getattr(self, name)
+            prefix = "await " if inspect.iscoroutinefunction(method) else ""
+            rows.append(
+                {
+                    "method": prefix + name + str(inspect.signature(method)),
+                    "description": (inspect.getdoc(method) or "").split("\n")[0],
+                }
+            )
+        return pd.DataFrame(rows, columns=["method", "description"])
+
     def summary(self, dformat: Optional[str] = None) -> Union[pd.DataFrame, str]:
         """Summarize the EcoPlots data.
 
@@ -280,6 +397,9 @@ class EcoPlots(EcoPlotsBase):
 
         Returns:
             A pandas DataFrame containing discovered values.
+
+        Raises:
+            EcoPlotsError: If the facet or required discovery arguments are invalid.
         """
         normalized = facet.strip().lower().replace("-", "_").replace(" ", "_")
         method_names = {
@@ -305,6 +425,26 @@ class EcoPlots(EcoPlotsBase):
             "feature_types": "get_feature_types",
             "observed_property": "get_observed_properties",
             "observed_properties": "get_observed_properties",
+            "platform_type": "get_platform_types",
+            "platform_types": "get_platform_types",
+            "platform_instance": "get_platform_instances",
+            "platform_instances": "get_platform_instances",
+            "platform_deployment": "get_platform_deployments",
+            "platform_deployments": "get_platform_deployments",
+            "instrument_type": "get_instrument_types",
+            "instrument_types": "get_instrument_types",
+            "system_type": "get_instrument_types",
+            "instrument_deployment": "get_instrument_deployments",
+            "instrument_deployments": "get_instrument_deployments",
+            "platform": "get_platforms",
+            "platforms": "get_platforms",
+            "platform_id": "get_platforms",
+            "deployment": "get_deployments",
+            "deployments": "get_deployments",
+            "deployment_id": "get_deployments",
+            "instrument": "get_instruments",
+            "instruments": "get_instruments",
+            "system_id": "get_instruments",
             "used_procedure": "get_used_procedures",
             "used_procedures": "get_used_procedures",
             "observation_attributes": "get_observation_attributes",
@@ -364,8 +504,7 @@ class EcoPlots(EcoPlotsBase):
             return samples_gdf
 
         if dformat in ("geojson", "json"):
-            geojson_data = self.fetch_data_sync(page_number=1, page_size=10)
-            return geojson_data
+            return self.fetch_data_sync(page_number=1, page_size=10)
 
         if dformat not in (None, "pandas", "geopandas", "pd", "gpd"):
             raise EcoPlotsError(
@@ -417,11 +556,42 @@ class EcoPlots(EcoPlotsBase):
 
         return _to_geopandas(aligned_df)
 
+    def cite(
+        self,
+        dformat: Optional[str] = None,
+        path: Optional[Union[str, Path]] = None,
+    ) -> str:
+        """Cite data matching the current filters and this software.
+
+        Args:
+            dformat: ``"text"`` (default) or ``"ris"``. When a path is supplied,
+                the format is inferred from its extension unless specified.
+            path: Optional ``.ris`` or ``.txt`` destination.
+
+        Returns:
+            Citation text, or the absolute saved path when ``path`` is supplied.
+
+        Examples:
+            Basic Usage:
+
+            .. code-block:: python
+
+                print(ec.cite())
+                ec.cite(path="references.ris")
+        """
+        selected = _citation_format(dformat, path)
+        query = copy.deepcopy(self._query_filters)
+        response = fetch_citations(self._base_url, query, self._mode)
+        return _render_citations(response, selected, path)
+
     def get_datasources(self) -> pd.DataFrame:
         """Get the data sources available for applied filters.
 
         Returns:
             A DataFrame containing the data sources.
+
+        Raises:
+            EcoPlotsError: If the current mode is unsupported.
         """
         if self._mode == "observations":
             data = super().discover("dataset")
@@ -442,6 +612,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("dataset")
         uris = data.get("dataset_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             ds_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -511,6 +682,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("site")
         uris = data.get("site_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             site_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -557,6 +729,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("site_visit")
         uris = data.get("site_visit_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             sv_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -636,6 +809,50 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover("observed_property")
         return pd.DataFrame(data)
 
+    def get_platform_types(self) -> pd.DataFrame:
+        """Discover platform types matching the current observation filters."""
+        return pd.DataFrame(super().discover("platform_type"))
+
+    def get_platform_instances(self) -> pd.DataFrame:
+        """Discover individual platforms matching the current observation filters."""
+        return pd.DataFrame(super().discover("platform_instance"))
+
+    def get_platform_deployments(self) -> pd.DataFrame:
+        """Discover deployments associated with the selected platforms."""
+        return pd.DataFrame(super().discover("platform_deployment"))
+
+    def get_instrument_types(self) -> pd.DataFrame:
+        """Discover instrument types matching the current observation filters."""
+        return pd.DataFrame(super().discover("instrument_type"))
+
+    def get_instrument_deployments(self) -> pd.DataFrame:
+        """Discover deployments associated with the selected instrument types."""
+        return pd.DataFrame(super().discover("instrument_deployment"))
+
+    def get_platforms(self) -> pd.DataFrame:
+        """Get the platforms available for the current observation filters.
+
+        Returns:
+            A DataFrame containing the platforms.
+        """
+        return self.get_platform_instances()
+
+    def get_deployments(self) -> pd.DataFrame:
+        """Get the deployments available for the current observation filters.
+
+        Returns:
+            A DataFrame containing the deployments.
+        """
+        return pd.DataFrame(super().discover("deployment"))
+
+    def get_instruments(self) -> pd.DataFrame:
+        """Get the instruments available for the current observation filters.
+
+        Returns:
+            A DataFrame containing the instruments.
+        """
+        return pd.DataFrame(super().discover("instrument"))
+
     def get_used_procedures(self) -> pd.DataFrame:
         """Get the used procedures available for the current filters.
 
@@ -652,6 +869,7 @@ class EcoPlots(EcoPlotsBase):
 
     def get_observation_attributes(self) -> pd.DataFrame:
         """Get the attributes of observations from the applied filters.
+
         Available only in "observations" mode.
 
         Returns:
@@ -666,6 +884,7 @@ class EcoPlots(EcoPlotsBase):
         data = super().discover_attributes("observation")
         uris = data.get("observation_attributes", []) or []
         rows = []
+        wait_for_vocabularies()
         with Cache(CACHE_DIR) as cache:
             obs_map = cache.get("attributes", {}) or {}
             for uri in uris:
@@ -679,6 +898,7 @@ class EcoPlots(EcoPlotsBase):
 
     def get_material_sample_types(self) -> pd.DataFrame:
         """Get the material sample types from the applied filters.
+
         Available only in "samples" mode.
 
         Returns:
@@ -812,35 +1032,61 @@ class EcoPlots(EcoPlotsBase):
         return cast(pd.DataFrame, self.discover_soilpit())
 
     def get_speciesname(self) -> pd.DataFrame:
-        """Get species name distribution for the current filters.
+        """Discover species names and counts in observations or samples mode.
 
-        Available only in "samples" mode.
-
-        This method preserves all current query filters, including ``has_image``.
+        Uses current selections, including has_image in samples mode. Names are
+        literal strings and can be passed to ``select(speciesname=...)``.
+        Facet results are limited to the buckets returned by the API.
 
         Returns:
-            A DataFrame with two columns: ``speciesname`` and ``count``.
-
-        Raises:
-            EcoPlotsError: If called in a mode other than "samples".
-            EcoPlotsError: If none of the required material sample types are selected.
+            A DataFrame with ``speciesname`` and ``count`` columns.
         """
-        if self._mode != "samples":
-            raise EcoPlotsError("Species distribution is only available in 'samples' mode.")
-
-        self._ensure_required_material_sample_types(
-            ["Plant Tissue Sample", "Plant Voucher Specimen"],
-            "Species distribution",
-        )
-
         return cast(pd.DataFrame, self.discover_species())
+
+    def _data_job_payloads(self, dformat, query):
+        if self._mode != "observations":
+            raise EcoPlotsError("submit_data_job() is available in observations mode only.")
+        self._validate_data_format(dformat)
+        if dformat == "geojson":
+            return [{"query": query}]
+        feature_types = pd.DataFrame(
+            EcoPlotsBase.discover(self, "feature_type", query_filters=query)
+        )
+        if "uri" not in feature_types.columns:
+            raise EcoPlotsError("No feature types found; cannot submit data jobs.")
+        uris = feature_types["uri"].dropna().astype(str).drop_duplicates().tolist()
+        return [{"query": {**copy.deepcopy(query), "feature_type": [uri]}} for uri in uris]
+
+    def submit_data_job(self, dformat: str = "csv") -> DataJob:
+        """Submit the current observation query without waiting for output.
+
+        Args:
+            dformat: Server output format: ``"csv"`` (default) or ``"geojson"``.
+
+        Returns:
+            A job handle with ``status``, ``refresh()``, ``wait()``, ``stream()``,
+            and ``download(path)``. CSV feature-type jobs are managed internally.
+
+        Examples:
+            Basic Usage:
+
+            .. code-block:: python
+                job = ec.submit_data_job()
+                job.refresh()
+                job.download("observations.csv")
+        """
+        query = copy.deepcopy(self._query_filters)
+        payloads = self._data_job_payloads(dformat, query)
+        return submit_jobs(self._base_url, dformat, payloads)
 
     def get_data(
         self,
         allow_full_download: Optional[bool] = False,
         dformat: Optional[str] = "gpd",
-    ) -> gpd.GeoDataFrame:
+    ) -> Union[gpd.GeoDataFrame, pd.DataFrame, bytes, dict]:
         """Retrieve EcoPlots data based on the current filters.
+
+        Observation jobs are submitted, polled, and downloaded automatically.
 
         Args:
             allow_full_download: If True, allows downloading the full
@@ -902,43 +1148,17 @@ class EcoPlots(EcoPlotsBase):
                 "If you are sure, call get_data(allow_full_download=True)."
             )
 
-        if dformat in ("geojson", "json"):
-            data = self.fetch_data_sync()
-            return data
-
-        if dformat not in _TABLE_FORMATS:
+        if dformat not in (None, *_TABLE_FORMATS, "geojson", "json"):
             raise EcoPlotsError(
-                "Invalid 'dformat' specified. Supported values are: None, "
-                "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', "
-                "'json', and 'parquet' (or 'pq')."
+                "Invalid 'dformat' specified. Supported values are: "
+                "'pandas'/'pd', 'geopandas'/'gpd', 'geojson'/'json', and 'parquet'/'pq'."
             )
-
-        feature_types_df = self.get_feature_types()
-
-        if "uri" not in feature_types_df.columns:
-            raise RuntimeError("No feature types found; cannot fetch data.")
-
-        uris = feature_types_df["uri"].dropna().astype(str).tolist()
-
-        if not uris:
-            # No feature types found, so no data to fetch;
-            # return empty gdf
-            return gpd.GeoDataFrame()
-
-        dfs = []
-        for uri in uris:
-            csv_bytes = cast(bytes, self.fetch_data_sync(dformat="csv", feature_type=[uri]))
-            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
-            dfs.append(df)
-
-        aligned_df = _align_and_concat(dfs)
-
-        if dformat in ("pandas", "pd"):
-            return aligned_df
-        if dformat in ("parquet", "pq"):
-            return _dataframe_to_parquet_bytes(aligned_df)
-
-        return _to_geopandas(aligned_df)
+        server_format = "geojson" if dformat in ("geojson", "json") else "csv"
+        job = self.submit_data_job(dformat=server_format)
+        result = job._result()
+        if server_format == "geojson":
+            return orjson.loads(result)
+        return _format_table(result, dformat)
 
     def export_data(
         self,
@@ -1024,6 +1244,10 @@ class EcoPlots(EcoPlotsBase):
 
         Returns:
             ipywidgets.VBox: Interactive viewer widget.
+
+        Raises:
+            EcoPlotsError: If fetching images without samples mode, an image filter,
+                or the plant voucher specimen material sample type.
         """
         from ._gui import sample_image_viewer
 
@@ -1056,6 +1280,9 @@ class EcoPlots(EcoPlotsBase):
         if not isinstance(data, pd.DataFrame):
             data = pd.DataFrame(data)
 
+        if image_column == "sample_images" and image_column not in data.columns:
+            image_column = "sample_image_urls"
+
         return sample_image_viewer(
             data,
             image_column=image_column,
@@ -1084,8 +1311,8 @@ class AsyncEcoPlots(EcoPlots):
             gdf = await ec.get_data()          # await the heavy network call
 
     Notes:
-        - Only `get_data()` is async here. Other methods inherited from
-          `EcoPlots` are synchronous and **will block**.
+        - Data retrieval, streaming, and export are async. Other methods remain
+          synchronous.
         - Safety guard: `get_data()` raises `RuntimeError` when no filters
           are set unless `allow_full_download=True`.
     """
@@ -1108,12 +1335,27 @@ class AsyncEcoPlots(EcoPlots):
         """
         super().__init__(filterset=filterset, query_filters=query_filters, mode=mode)
 
-    async def get_data(
+    def submit_data_job(self, dformat: str = "csv") -> AsyncDataJob:  # type: ignore[override]
+        """Submit the current observation query synchronously without waiting for output.
+
+        Args:
+            dformat: Server output format: ``"csv"`` (default) or ``"geojson"``.
+
+        Returns:
+            A job handle with ``status`` and ``refresh()``, awaitable ``wait()``
+            and ``download(path)``, and an async ``stream()`` iterator.
+        """
+        job = super().submit_data_job(dformat)
+        return AsyncDataJob(self._base_url, dformat, job.jobs)
+
+    async def get_data(  # type: ignore[override]
         self,
         allow_full_download: Optional[bool] = False,
         dformat: Optional[str] = "gpd",
-    ) -> gpd.GeoDataFrame:  # noqa: DAR401
+    ) -> Union[gpd.GeoDataFrame, pd.DataFrame, bytes, dict]:  # noqa: DAR401
         """Retrieve EcoPlots data asynchronously based on the current filters.
+
+        Observation jobs are submitted, polled, and downloaded automatically.
 
         Args:
             allow_full_download: If True, allows downloading the full
@@ -1150,60 +1392,28 @@ class AsyncEcoPlots(EcoPlots):
                 )
 
             samples_gdf = cast(gpd.GeoDataFrame, await self.fetch_samples_data())
-            if dformat in ("parquet", "pq"):
-                return _dataframe_to_parquet_bytes(pd.DataFrame(samples_gdf))
-            if dformat in ("pandas", "pd"):
-                return pd.DataFrame(samples_gdf)
+            if dformat in ("parquet", "pq", "pandas", "pd"):
+                return await asyncio.to_thread(_format_table, samples_gdf, dformat)
             return samples_gdf
 
-        if not self._filters and not allow_full_download:
+        if not self._query_filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
                 "can crash your environment. Proceed with caution!\n"
                 "If you are sure, call get_data(allow_full_download=True)."
             )
 
-        if dformat in ("geojson", "json"):
-            data = await self.fetch_data()
-            return data
-
-        if dformat not in (None, *_TABLE_FORMATS):
+        if dformat not in (None, *_TABLE_FORMATS, "geojson", "json"):
             raise EcoPlotsError(
-                "Invalid 'dformat' specified. Supported values are: None, "
-                "'pandas' (or 'pd'), 'geopandas' (or 'gpd'), 'geojson', "
-                "'json', and 'parquet' (or 'pq')."
+                "Invalid 'dformat' specified. Supported values are: "
+                "'pandas'/'pd', 'geopandas'/'gpd', 'geojson'/'json', and 'parquet'/'pq'."
             )
-
-        # for pandas/geopandas output, we request one csv per feature type and merge
-        feature_types_df = self.get_feature_types()
-
-        if "uri" not in feature_types_df.columns:
-            raise RuntimeError("No feature types found; cannot fetch data.")
-        uris = feature_types_df["uri"].dropna().astype(str).tolist()
-
-        if not uris:
-            # No feature types found, so no data to fetch;
-            # return empty gdf
-            return gpd.GeoDataFrame()
-
-        dfs = []
-        tasks = [
-            asyncio.create_task(self.fetch_data(dformat="csv", feature_type=[uri])) for uri in uris
-        ]
-        for task in asyncio.as_completed(tasks):
-            payload = await task
-            csv_bytes = cast(bytes, payload)
-            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
-            dfs.append(df)
-
-        aligned_df = _align_and_concat(dfs)
-
-        if dformat in ("pandas", "pd"):
-            return aligned_df
-        if dformat in ("parquet", "pq"):
-            return _dataframe_to_parquet_bytes(aligned_df)
-
-        return _to_geopandas(aligned_df)
+        server_format = "geojson" if dformat in ("geojson", "json") else "csv"
+        job = await asyncio.to_thread(self.submit_data_job, dformat=server_format)
+        result = await job._result()
+        if server_format == "geojson":
+            return await asyncio.to_thread(orjson.loads, result)
+        return await asyncio.to_thread(_format_table, result, dformat)
 
     async def get_data_stream(
         self,
@@ -1223,6 +1433,10 @@ class AsyncEcoPlots(EcoPlots):
             GeoJSON lines, GeoDataFrames, or parquet bytes depending on
             ``dformat``.
 
+        Raises:
+            EcoPlotsError: If the streaming format is unsupported.
+            RuntimeError: If downloading without filters is not explicitly allowed.
+
         Examples:
             .. code-block:: python
 
@@ -1241,7 +1455,7 @@ class AsyncEcoPlots(EcoPlots):
         if self._mode == "samples":
             if dformat in ("geojson", "json"):
                 raise EcoPlotsError(
-                    "In 'samples' mode, streaming supports 'geopandas'/'gpd' " "and 'parquet'/'pq'."
+                    "In 'samples' mode, streaming supports 'geopandas'/'gpd' and 'parquet'/'pq'."
                 )
             data = await self.get_data(
                 allow_full_download=allow_full_download,
@@ -1250,7 +1464,7 @@ class AsyncEcoPlots(EcoPlots):
             yield data
             return
 
-        if not self._filters and not allow_full_download:
+        if not self._query_filters and not allow_full_download:
             raise RuntimeError(
                 "No filters specified! Downloading full EcoPlots dataset "
                 "can crash your environment. Proceed with caution!\n"
@@ -1258,8 +1472,12 @@ class AsyncEcoPlots(EcoPlots):
             )
 
         if dformat in ("geojson", "json"):
-            async for line in self.iter_fetch_data_lines(dformat="geojson"):
-                yield line
+            lines = self.iter_fetch_data_lines(dformat="geojson")
+            try:
+                async for line in lines:
+                    yield line
+            finally:
+                await lines.aclose()
             return
 
         if dformat not in ("geopandas", "gpd", "parquet", "pq"):
@@ -1268,25 +1486,13 @@ class AsyncEcoPlots(EcoPlots):
                 "'geopandas' (or 'gpd'), 'parquet' (or 'pq'), and 'geojson'/'json'."
             )
 
-        feature_types_df = self.get_feature_types()
-
-        if "uri" not in feature_types_df.columns:
-            raise RuntimeError("No feature types found; cannot fetch data.")
-
-        uris = feature_types_df["uri"].dropna().astype(str).tolist()
-        if not uris:
-            return
-
-        tasks = [
-            asyncio.create_task(self.fetch_data(dformat="csv", feature_type=[uri])) for uri in uris
-        ]
-        for task in asyncio.as_completed(tasks):
-            csv_bytes = cast(bytes, await task)
-            df = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8")))
-            if dformat in ("parquet", "pq"):
-                yield _dataframe_to_parquet_bytes(df)
-            else:
-                yield _to_geopandas(df)
+        job = await asyncio.to_thread(self.submit_data_job)
+        chunks = job.stream()
+        try:
+            async for df in chunks:
+                yield await asyncio.to_thread(_format_table, df, dformat)
+        finally:
+            await chunks.aclose()
 
     async def export_data(
         self,
@@ -1323,4 +1529,4 @@ class AsyncEcoPlots(EcoPlots):
             allow_full_download=allow_full_download,
             dformat=normalized,
         )
-        return _write_data_to_file(data, path, normalized)
+        return await asyncio.to_thread(_write_data_to_file, data, path, normalized)

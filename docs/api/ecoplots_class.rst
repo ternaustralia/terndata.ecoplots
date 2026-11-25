@@ -17,6 +17,10 @@ The standard install includes observations and samples mode, discovery,
 filtering, data retrieval, site/site-visit attribute data, and Parquet output.
 Install ``terndata.ecoplots[gui]`` only when you need Jupyter widget helpers.
 
+Observation retrieval handles job submission and polling automatically. Use
+``ec.submit_data_job()`` to retrieve results later; see :doc:`data_jobs`.
+Use ``ec.cite()`` for references or RIS export; see :doc:`citations`.
+
 Constructor Parameters
 ----------------------
 

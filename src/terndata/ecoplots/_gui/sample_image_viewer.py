@@ -11,7 +11,7 @@ import importlib.resources as ir
 from typing import Any
 
 import pandas as pd
-from ipywidgets import Button, Dropdown, HTML, HBox, Layout, VBox
+from ipywidgets import HTML, Button, Dropdown, HBox, Layout, VBox
 
 
 def _as_data_uri(binary: bytes, mime: str) -> str:
@@ -43,17 +43,22 @@ def _extract_image_options(value: Any) -> list[tuple[str, str]]:
 
     if isinstance(value, dict):
         for key, candidate in value.items():
-            if isinstance(candidate, str) and candidate.strip() and key in {
-                "original",
-                "thumbnail_320",
-                "thumbnail_640",
-                "thumbnail_1280",
-                "url",
-                "href",
-                "src",
-                "download_url",
-                "thumbnail",
-            }:
+            if (
+                isinstance(candidate, str)
+                and candidate.strip()
+                and key
+                in {
+                    "original",
+                    "thumbnail_320",
+                    "thumbnail_640",
+                    "thumbnail_1280",
+                    "url",
+                    "href",
+                    "src",
+                    "download_url",
+                    "thumbnail",
+                }
+            ):
                 options.append((key, candidate))
             elif isinstance(candidate, (list, dict)):
                 options.extend(_extract_image_options(candidate))
@@ -121,14 +126,15 @@ def sample_image_viewer(
             else:
                 base_label = f"Sample {idx}"
 
-            sci_for_label = _italicize_text(scientific_display) if scientific_display != "N/A" else "N/A"
+            sci_for_label = (
+                _italicize_text(scientific_display) if scientific_display != "N/A" else "N/A"
+            )
             label = f"{base_label} ({sci_for_label})"
 
             rows_with_images.append((idx, label, scientific_display, image_options))
 
     if not rows_with_images:
         return VBox([HTML("<b>No rows with images were found.</b>")])
-
 
     row_dropdown = Dropdown(
         options=[(label, idx) for idx, label, _, _ in rows_with_images],
@@ -175,7 +181,8 @@ def sample_image_viewer(
             "<div style='position:absolute; right:2px; bottom:2px; display:flex; align-items:center; "
             "gap:3px; color:#000; font-size:10px; font-weight:500;'>"
             "<span style='font-size:10px;'>Powered by</span>"
-            f"<img src='{ecoplots_logo_uri}' style='height:12px; margin-bottom:2px; filter:{ecoplots_svg_filter};'/>"
+            f"<img src='{ecoplots_logo_uri}' "
+            f"style='height:12px; margin-bottom:2px; filter:{ecoplots_svg_filter};'/>"
             "<span style='color:#f8c59d; margin-left:1px;'>EcoPlots</span>"
             "</div>"
             "</div>"
@@ -249,8 +256,9 @@ def sample_image_viewer(
                 "var dy=event.clientY-Number(this.dataset.sy);"
                 "var tx=Number(this.dataset.ox||0)+dx;"
                 "var ty=Number(this.dataset.oy||0)+dy;"
-                f"this.querySelector('img').style.transform='translate('+tx+'px,'+ty+'px) scale({zoom_scale:.4f})';"
-                "this.dataset.cx=tx;this.dataset.cy=ty;}\" "
+                "this.querySelector('img').style.transform="
+                f"'translate('+tx+'px,'+ty+'px) scale({zoom_scale:.4f})';"
+                'this.dataset.cx=tx;this.dataset.cy=ty;}" '
                 "onpointerup=\"this.dataset.drag='0';"
                 "this.dataset.ox=this.dataset.cx||'0';"
                 "this.dataset.oy=this.dataset.cy||'0';"

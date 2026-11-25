@@ -4,6 +4,8 @@ Defines the API base URL, cache settings, magic bytes for ``.ecoproj`` binary
 project files, and the facet lists that control which filter keys are valid in
 each operational mode (``"observations"`` / ``"samples"``).
 """
+
+import hashlib
 import os
 import tempfile
 
@@ -11,7 +13,7 @@ import tempfile
 
 try:
     from .version import __version__ as VERSION
-except Exception:  # pragma: no cover - defensive fallback for source checkouts
+except ImportError:  # pragma: no cover - defensive fallback for source checkouts
     VERSION = "1.0.0"
 
 PRODUCTION_API_BASE_URL = "https://ecoplots.tern.org.au"
@@ -37,9 +39,44 @@ def _resolve_api_base_url(version: str = VERSION) -> str:
 API_BASE_URL = _resolve_api_base_url()
 
 CACHE_EXPIRE_SECONDS = 60 * 60 * 24 * 14  # Default cache expiration time: 14 days
-CACHE_DIR = os.path.join(tempfile.gettempdir(), "ecoplots_labels_cache")
+CACHE_DIR = os.path.join(
+    tempfile.gettempdir(),
+    "ecoplots_labels_cache",
+    hashlib.sha256(API_BASE_URL.rstrip("/").encode()).hexdigest()[:16],
+)
 
 MAGIC = b"ECPJ"
+
+# Public subfacets resolve independently and are grouped only in API payloads.
+EQUIPMENT_FACETS = {
+    "platform_type": ("platform", "type", "platform_type"),
+    "platform_instance": ("platform", "instance", "platform_id"),
+    "platform_deployment": ("platform", "deployment", "deployment_id"),
+    "instrument_type": ("instrument", "type", "system_type"),
+    "instrument_deployment": ("instrument", "deployment", "deployment_id"),
+}
+EQUIPMENT_GROUPS = {
+    group: {child: name for name, (parent, child, _) in EQUIPMENT_FACETS.items() if parent == group}
+    for group in ("platform", "instrument")
+}
+
+FACET_API_NAMES = {
+    "platform": "platform_id",
+    "deployment": "deployment_id",
+    "instrument": "system_id",
+}
+FACET_ALIASES = {
+    **{api_name: facet for facet, api_name in FACET_API_NAMES.items()},
+    "platforms": "platform",
+    "deployments": "deployment",
+    "instruments": "instrument",
+    "system_type": "instrument_type",
+    **{name + "s": name for name in EQUIPMENT_FACETS},
+}
+FACET_VOCAB_NAMES = {
+    **FACET_API_NAMES,
+    **{name: vocabulary for name, (_, _, vocabulary) in EQUIPMENT_FACETS.items()},
+}
 
 VOCAB_FACETS = [
     "region_type",
@@ -47,21 +84,30 @@ VOCAB_FACETS = [
     "dataset",
     "site_id",
     "site_visit_id",
+    "platform_id",
+    "deployment_id",
+    "system_id",
     "feature_type",
     "observed_property",
     "attributes",
     # "units",
     "used_procedure",
-    # "system_type",
+    "system_type",
+    "platform_type",
     "core_attributes",
 ]
 
 QUERY_FACETS = [
+    "speciesname",
+    *EQUIPMENT_FACETS,
     "region_type",
     "region",
     "dataset",
     "site_id",
     "site_visit_id",
+    "platform",
+    "deployment",
+    "instrument",
     "feature_type",
     "observed_property",
     "spatial",
@@ -88,12 +134,16 @@ SAMPLE_QUERY_FACETS = [
 ]
 
 DISCOVERY_FACETS = [
+    *EQUIPMENT_FACETS,
     "region",
     "dataset",
     "feature_type",
     "observed_property",
     "site_id",
     "used_procedure",
+    "platform",
+    "deployment",
+    "instrument",
 ]
 
 SAMPLE_DISCOVERY_FACETS = [

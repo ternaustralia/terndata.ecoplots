@@ -1,3 +1,5 @@
+import asyncio
+import codecs
 import copy
 import hashlib
 import struct
@@ -6,7 +8,6 @@ import tempfile
 import warnings
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from diskcache import Cache
 from pathlib import Path
 from typing import (
     Optional,
@@ -16,26 +17,33 @@ from typing import (
 
 import orjson
 import requests
+from diskcache import Cache
 from rapidfuzz import fuzz, process
 
 from ._config import (
     API_BASE_URL,
+    CACHE_DIR,
     DISCOVERY_ATTRIBUTES,
     DISCOVERY_FACETS,
+    EQUIPMENT_FACETS,
+    EQUIPMENT_GROUPS,
+    FACET_ALIASES,
+    FACET_API_NAMES,
     MAGIC,
+    MATERIAL_SAMPLE_TYPE_MAP,
     QUERY_FACETS,
     SAMPLE_QUERY_FACETS,
     VERSION,
-    CACHE_DIR,
-    MATERIAL_SAMPLE_TYPE_MAP,
 )
 from ._exceptions import EcoPlotsError
+from ._jobs import _aiohttp, _csv_bytes, async_submit_jobs, submit_jobs
 from ._nlp_utils import (
     resolve_facet,
     resolve_region_type,
     validate_facet,
 )
 from ._utils import _ensure_ecoproj_path, _parse_date, _validate_spatial_input
+from ._vocab_cache import wait_for_vocabularies
 
 SelfType = TypeVar("SelfType", bound="EcoPlotsBase")
 PROJECT_FILE_VERSION = 1
@@ -83,7 +91,7 @@ class EcoPlotsBase:
         """
         self._base_url = API_BASE_URL
         self._mode = self._resolve_mode(mode)
-        self._filters = filterset or {}
+        self._filters = self._normalize_filter_keys(filterset or {})
         self._query_filters = query_filters or {}
         # In samples mode we enforce a persistent dataset selection which
         # cannot be removed by the user. Ensure both human-facing and
@@ -105,6 +113,40 @@ class EcoPlotsBase:
                     self._query_filters["dataset"].insert(0, persistent_uri)
 
         self._display_init_message()
+
+    @staticmethod
+    def _normalize_filter_keys(filters: dict) -> dict:
+        """Expose grouped equipment selections as ordinary public facets."""
+        normalized: dict = {}
+
+        def merge(facet, value):
+            if facet in normalized and normalized[facet] is not None and value is not None:
+                existing = normalized[facet]
+                existing = list(existing) if isinstance(existing, (list, tuple)) else [existing]
+                values = list(value) if isinstance(value, (list, tuple)) else [value]
+                normalized[facet] = existing + [item for item in values if item not in existing]
+            else:
+                normalized[facet] = value
+
+        for key, value in filters.items():
+            facet = FACET_ALIASES.get(key, key)
+            if facet in EQUIPMENT_GROUPS and isinstance(value, dict):
+                for child, values in value.items():
+                    public_facet = EQUIPMENT_GROUPS[facet].get(child)
+                    if public_facet:
+                        merge(public_facet, values)
+            else:
+                merge(facet, value)
+        return normalized
+
+    def _api_filter_values(self, facet):
+        """Read a public facet from either grouped or legacy API state."""
+        if facet in EQUIPMENT_FACETS:
+            group, child, _ = EQUIPMENT_FACETS[facet]
+            return self._query_filters.get(group, {}).get(child)
+        if facet in EQUIPMENT_GROUPS and facet not in self._filters:
+            return self._query_filters.get(facet)
+        return self._query_filters.get(FACET_API_NAMES.get(facet, facet))
 
     @staticmethod
     def _resolve_mode(mode: str) -> str:
@@ -188,7 +230,8 @@ class EcoPlotsBase:
 
         # Header with decorative separator
         header = f"╔{'═' * BOX_WIDTH}╗"
-        title = f"║ {self.__class__.__name__} {self._mode.capitalize():<{BOX_WIDTH - 2 - len(self.__class__.__name__) - 1}} ║"
+        mode_width = BOX_WIDTH - 2 - len(self.__class__.__name__) - 1
+        title = f"║ {self.__class__.__name__} {self._mode.capitalize():<{mode_width}} ║"
         version_line = f"║ Version: {VERSION:<{BOX_WIDTH - 11}} ║"
         separator = f"╠{'═' * BOX_WIDTH}╣"
         footer = f"╚{'═' * BOX_WIDTH}╝"
@@ -429,11 +472,12 @@ class EcoPlotsBase:
                 # The following raises KeyError (unknown facet):
                 # "not_a_facet" in ec
         """
+        item = FACET_ALIASES.get(item, item)
         if item not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{item}`. Allowed: " + ", ".join(QUERY_FACETS))
-        return item in self._filters and item in self._query_filters
+        return self.get_filter(item) is not None and self._api_filter_values(item) is not None
 
-    def __getitem__(self, item: str) -> list:
+    def __getitem__(self, item: str) -> Union[list, dict]:
         """Retrieve the human-visible values for a given facet.
 
         Validates the facet name and ensures it is present in the current
@@ -459,11 +503,13 @@ class EcoPlotsBase:
                 ec = EcoPlots().select(site_id=["TCFTNS0002", "TCFTNS0003"])
                 ec["site_id"]  # ["TCFTNS0002", "TCFTNS0003"]
         """
+        item = FACET_ALIASES.get(item, item)
         if item not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{item}`. Allowed: " + ", ".join(QUERY_FACETS))
-        if item not in self._filters:
+        values = self.get_filter(item)
+        if values is None:
             raise KeyError(f"Key `{item}` not present in current instance.")
-        return self._filters.get(item, [])
+        return values
 
     def __setitem__(self, facet: str, values: Union[str, list[str]]):
         """Assign values to a facet (delegates to select).
@@ -491,6 +537,7 @@ class EcoPlotsBase:
                 ec["site_id"] = ["TCFTNS0002", "TCFTNS0003"]
                 ec["dataset"] = "TERN Surveillance"
         """
+        facet = FACET_ALIASES.get(facet, facet)
         if facet not in QUERY_FACETS:
             raise KeyError(f"Invalid key `{facet}`. Allowed: " + ", ".join(QUERY_FACETS))
         self.select(filters={facet: values})
@@ -525,12 +572,14 @@ class EcoPlotsBase:
             if len(key) != 2:
                 raise KeyError("Expected ('facet', values) for value deletion.")
             facet, values = key
+            facet = FACET_ALIASES.get(facet, facet)
             # Allow human/canonical names here by resolving to canonical
             if facet not in allowed_facets:
                 raise KeyError(f"Unknown facet {facet!r}. Allowed: {', '.join(allowed_facets)}")
             # Delegate; remove() expects canonical keys, same as select()
             self.remove(filters={facet: values})
         else:
+            key = FACET_ALIASES.get(key, key)
             if key not in allowed_facets:
                 raise KeyError(f"Unknown facet {key!r}. Allowed: {', '.join(allowed_facets)}")
             self.remove(filters={key: None})
@@ -565,6 +614,8 @@ class EcoPlotsBase:
         Raises:
             EcoPlotsError: Unknown filter keys.
             EcoPlotsError: ``region`` provided without current or new ``region_type``.
+            Exception: Vocabulary or API errors are propagated after restoring
+                the prior filter state.
 
         Returns:
             self for chaining.
@@ -578,6 +629,7 @@ class EcoPlotsBase:
         if kwargs:
             input_filters.update(kwargs)
 
+        input_filters = self._normalize_filter_keys(input_filters)
         if self._mode == "samples":
             alias_map = {
                 "soil_subsite": "soil_subsite_id",
@@ -607,6 +659,12 @@ class EcoPlotsBase:
         if invalid_keys:
             raise EcoPlotsError(f"Invalid filter keys: {invalid_keys}. Allowed: {allowed_facets}")
 
+        for facet, value in input_filters.items():
+            if facet in EQUIPMENT_FACETS and value is not None:
+                values = list(value) if isinstance(value, (list, tuple)) else [value]
+                if not all(isinstance(item, str) for item in values):
+                    raise EcoPlotsError(f"'{facet}' must be a string or list of strings.")
+
         # 3. Validate region logic
         if "region" in input_filters:
             region_type_now = "region_type" in input_filters
@@ -616,6 +674,7 @@ class EcoPlotsBase:
 
         # 4. Save current state for potential rollback
         filters_backup = copy.deepcopy(self._filters)
+        query_backup = copy.deepcopy(self._query_filters)
 
         # 5. Merge filters (always as list)
         for k, v in input_filters.items():
@@ -648,10 +707,10 @@ class EcoPlotsBase:
                 for raw in vals:
                     try:
                         subsite_id = int(raw)
-                    except (TypeError, ValueError):
+                    except (TypeError, ValueError) as exc:
                         raise EcoPlotsError(
                             "'soil_subsite_id' must be an integer or list of integers."
-                        )
+                        ) from exc
                     normalized_subsite_ids.append(subsite_id)
 
                 existing_ids = self._filters.get("soil_subsite_id", [])
@@ -686,8 +745,10 @@ class EcoPlotsBase:
                 try:
                     min_depth = float(min_depth)
                     max_depth = float(max_depth)
-                except (TypeError, ValueError):
-                    raise EcoPlotsError("'soil_depth_range' min/max must be numeric values.")
+                except (TypeError, ValueError) as exc:
+                    raise EcoPlotsError(
+                        "'soil_depth_range' min/max must be numeric values."
+                    ) from exc
 
                 if max_depth <= min_depth:
                     raise EcoPlotsError("Invalid 'soil_depth_range': max must be greater than min.")
@@ -706,11 +767,16 @@ class EcoPlotsBase:
                 self._filters[k] = list(v)
 
         # 6. Validate filters - if validation fails (returns False), rollback
-        validation_passed = self._validate_filters()
+        try:
+            validation_passed = self._validate_filters()
+        except Exception:
+            self._filters = filters_backup
+            self._query_filters = query_backup
+            raise
 
         if not validation_passed:
-            # Rollback to previous state
             self._filters = filters_backup
+            self._query_filters = query_backup
 
         # print(f"Filters updated: {self._filters}")  # Debugging output
 
@@ -744,6 +810,18 @@ class EcoPlotsBase:
             input_filters.update(filters)
         if kwargs:
             input_filters.update(kwargs)
+        expanded_filters: dict = {}
+        for key, values in input_filters.items():
+            group = FACET_ALIASES.get(key, key)
+            children = EQUIPMENT_GROUPS.get(group, {})
+            applied = [name for name in children.values() if name in self._filters]
+            if values is None and applied:
+                expanded_filters.update(dict.fromkeys(applied))
+                if group in self._filters:
+                    expanded_filters[group] = None
+            else:
+                expanded_filters[key] = values
+        input_filters = self._normalize_filter_keys(expanded_filters)
         # 1. Determine allowed facets based on mode
         allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
 
@@ -755,7 +833,8 @@ class EcoPlotsBase:
         # Protect persistent dataset in samples mode
         if self._mode == "samples" and "dataset" in input_filters:
             raise EcoPlotsError(
-                "Cannot remove 'dataset' when in 'samples' mode. The dataset 'TERN Surveillance' is required and protected."
+                "Cannot remove 'dataset' when in 'samples' mode. "
+                "The dataset 'TERN Surveillance' is required and protected."
             )
 
         removed_facets = set()
@@ -783,6 +862,11 @@ class EcoPlotsBase:
             else:
                 vals = list(vals)
 
+            if facet in EQUIPMENT_FACETS:
+                _, _, matched, unmatched, _ = validate_facet(facet, vals)
+                if unmatched:
+                    raise EcoPlotsError(f"Values not found in facet {facet!r}: {unmatched}")
+                vals = matched
             existing = self._filters.get(facet, [])
             missing = [v for v in vals if v not in existing]
             if missing:
@@ -843,9 +927,6 @@ class EcoPlotsBase:
         Returns:
             self (chainable)
 
-        Raises:
-            EcoPlotsError: If the date string cannot be parsed.
-
         Examples:
             .. code-block:: python
 
@@ -866,9 +947,6 @@ class EcoPlotsBase:
 
         Returns:
             self (chainable)
-
-        Raises:
-            EcoPlotsError: If the date string cannot be parsed.
 
         Examples:
             .. code-block:: python
@@ -895,6 +973,13 @@ class EcoPlotsBase:
             allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
             facet_val = resolve_facet(facet, allowed_facets)
             if facet_val:
+                if facet_val in EQUIPMENT_GROUPS and facet_val not in self._filters:
+                    children = {
+                        child: self._filters[name]
+                        for child, name in EQUIPMENT_GROUPS[facet_val].items()
+                        if name in self._filters
+                    }
+                    return children or None
                 return self._filters.get(facet_val)
             raise EcoPlotsError(
                 f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(allowed_facets)
@@ -920,7 +1005,7 @@ class EcoPlotsBase:
             allowed_facets = SAMPLE_QUERY_FACETS if self._mode == "samples" else QUERY_FACETS
             facet_val = resolve_facet(facet, allowed_facets)
             if facet_val:
-                return self._query_filters.get(facet_val)
+                return self._api_filter_values(facet_val)
             raise EcoPlotsError(
                 f"Invalid facet name `{facet}`. Allowed facets: " + ", ".join(allowed_facets)
             )
@@ -960,14 +1045,26 @@ class EcoPlotsBase:
         if not facet_param:
             raise EcoPlotsError(f"Invalid discovery facet: {discovery_facet}")
 
+        if self._mode == "samples" and facet_param in {*FACET_API_NAMES, *EQUIPMENT_FACETS}:
+            raise EcoPlotsError(
+                f"'{facet_param}' discovery is available in observations mode only."
+            )
+
         params = []
         if facet_param == "region" and region_type:
             region_type_val = resolve_region_type(region_type)
-            params.append(("region_type", region_type_val))
+            if region_type_val:
+                api_region_type = region_type_val.removeprefix("IBRA7 ").lower().replace(" ", "-")
+                params.append(("region_type", api_region_type))
         if facet_param == "site_id" and include_region:
             params.append(("include-regions", "True"))
 
-        url = f"{self._base_url}/api/v1.0/discovery/{facet_param}"
+        api_facet = (
+            "platform_instance"
+            if facet_param == "platform"
+            else FACET_API_NAMES.get(facet_param, facet_param)
+        )
+        url = f"{self._base_url}/api/v1.0/discovery/{api_facet}"
 
         payload = {
             "query": (
@@ -1072,6 +1169,7 @@ class EcoPlotsBase:
                 return []
 
             # Remove doc_count and add uri from cache
+            wait_for_vocabularies()
             with Cache(CACHE_DIR) as cache:
                 region_type_map = cache.get("region_type", {})
                 for res in parsed:
@@ -1088,6 +1186,7 @@ class EcoPlotsBase:
                 return []
 
             # Remove doc_count and add uri from cache
+            wait_for_vocabularies()
             with Cache(CACHE_DIR) as cache:
                 region_map = cache.get("region", {})
                 for res in parsed:
@@ -1114,6 +1213,7 @@ class EcoPlotsBase:
             if not isinstance(parsed, list):
                 return []
 
+            wait_for_vocabularies()
             with Cache(CACHE_DIR) as cache:
                 facet_map = cache.get(facet_param, {})
                 for res in parsed:
@@ -1151,11 +1251,11 @@ class EcoPlotsBase:
 
         try:
             import geopandas
-        except ImportError:
+        except ImportError as exc:
             raise EcoPlotsError(
                 "geopandas is required for discover_soil_depth_range(). "
                 "Install it with: pip install geopandas"
-            )
+            ) from exc
 
         payload = {"query": copy.deepcopy(self._query_filters)}
         # Keep payload compatible with discovery-style samples endpoints.
@@ -1209,10 +1309,10 @@ class EcoPlotsBase:
 
         try:
             import pandas as pd
-        except ImportError:
+        except ImportError as exc:
             raise EcoPlotsError(
                 "pandas is required for discover_soilpit(). Install it with: pip install pandas"
-            )
+            ) from exc
 
         payload = {"query": copy.deepcopy(self._query_filters)}
 
@@ -1245,59 +1345,55 @@ class EcoPlotsBase:
         return pd.DataFrame(rows, columns=["soilpit", "counts"])
 
     def discover_species(self):
-        """Discover species name distribution for the current samples query.
+        """Discover species names and counts using the current mode's UI facet.
 
-        Sends the current query to the ``/samples/speciesname`` endpoint and
-        returns a two-column table with species name and document count.
-
-        Notes:
-            - Preserves all query filters including ``has_image``.
-
-        Returns:
-            pandas.DataFrame: Columns are ``speciesname`` and ``count``.
-
-        Raises:
-            EcoPlotsError: If called outside ``samples`` mode.
+        Preserves current filters, including image filtering in samples mode.
+        Returns the API's species facet buckets as speciesname/count rows.
         """
-        if self._mode != "samples":
-            raise EcoPlotsError("Species discovery is only available in 'samples' mode.")
+        import pandas as pd
 
-        try:
-            import pandas as pd
-        except ImportError:
-            raise EcoPlotsError(
-                "pandas is required for discover_speciesname(). Install it with: pip install pandas"
-            )
-
-        payload = {"query": copy.deepcopy(self._query_filters)}
-
-        resp = requests.post(
-            f"{self._base_url}/api/v1.0/samples/speciesname",
+        query = copy.deepcopy(self._query_filters)
+        payload = {"query": query}
+        endpoint = "ui/facet"
+        if self._mode == "samples":
+            endpoint += "/samples"
+            payload["has_image"] = query.pop("has_image", False)
+        response = requests.post(
+            f"{self._base_url}/api/v1.0/{endpoint}",
+            params={"facet": "speciesname"},
             json=payload,
-            timeout=30,
+            timeout=60,
         )
-        resp.raise_for_status()
-
-        parsed = orjson.loads(resp.content)
+        response.raise_for_status()
         buckets = (
-            (((parsed or {}).get("aggregations", {}) or {}).get("speciesname", {}) or {})
+            response.json()
+            .get("aggregations", {})
+            .get("speciesname", {})
             .get("value", {})
             .get("buckets", [])
         )
+        return pd.DataFrame(
+            [
+                {"speciesname": bucket["key"], "count": bucket.get("doc_count", 0)}
+                for bucket in buckets
+                if isinstance(bucket, dict) and "key" in bucket
+            ],
+            columns=["speciesname", "count"],
+        )
 
-        rows = []
-        if isinstance(buckets, list):
-            for bucket in buckets:
-                if not isinstance(bucket, dict):
-                    continue
-                rows.append(
-                    {
-                        "speciesname": bucket.get("key"),
-                        "count": bucket.get("doc_count"),
-                    }
-                )
+    def _data_payload(self, page_number=None, page_size=None, **extras):
+        payload = {"query": copy.deepcopy(self._query_filters)}
+        payload["query"].update(extras)
+        if (page_number is None) != (page_size is None):
+            raise EcoPlotsError("page_number and page_size must be provided together.")
+        if page_number is not None:
+            payload.update(page_number=page_number, page_size=page_size)
+        return payload
 
-        return pd.DataFrame(rows, columns=["speciesname", "count"])
+    @staticmethod
+    def _validate_data_format(dformat):
+        if dformat not in ("geojson", "csv"):
+            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
 
     async def fetch_data(
         self,
@@ -1305,53 +1401,15 @@ class EcoPlotsBase:
         page_size: Optional[int] = None,
         dformat: str = "geojson",
         **extras,
-    ) -> dict:
-        """Fetch data for the current query, optionally paginated.
-
-        Posts the current query filters to `EcoPlots API` data endpoint.
-
-        Args:
-            page_number: Page index to request. Must be provided together with ``page_size``.
-            page_size: Number of items per page. Must be provided together with ``page_number``.
-            dformat: Output format, either "geojson" (default) or "csv".
-            **extras: Additional query filters to merge into the current query
-
-        Returns:
-            Parsed JSON payload (GeoJSON) returned by the data endpoint.
-
-        Raises:
-            EcoPlotsError: If an invalid dformat is provided.
-
-        Notes:
-            - Timeout is 300s (5 min) when pagination is used; 3000s (50 min) otherwise.
-            - Socket read timeout matches total timeout; connection timeout is 30s.
-            - Intended for internal use only.
-        """
-        if dformat == "parquet":
-            raise EcoPlotsError(
-                "Parquet is available via get_data(dformat='parquet'), not fetch_data()."
-            )
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        line_iter = self.iter_fetch_data_lines(
-            page_number=page_number,
-            page_size=page_size,
-            dformat=dformat,
-            **extras,
-        )
+    ):
+        """Submit a single data job and asynchronously retrieve its complete output."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = await async_submit_jobs(self._base_url, dformat, [payload])
+        result = await job._result(preserve_strings=True)
         if dformat == "csv":
-            buffer = bytearray()
-            async for line in line_iter:
-                if buffer:
-                    buffer.extend(b"\n")
-                buffer.extend(line.encode("utf-8"))
-            return bytes(buffer)
-
-        buffer = bytearray()
-        async for line in line_iter:
-            buffer.extend(line.encode("utf-8"))
-        return orjson.loads(buffer)
+            return await asyncio.to_thread(_csv_bytes, result)
+        return await asyncio.to_thread(orjson.loads, result)
 
     def fetch_data_sync(
         self,
@@ -1359,33 +1417,13 @@ class EcoPlotsBase:
         page_size: Optional[int] = None,
         dformat: str = "geojson",
         **extras,
-    ) -> dict:
-        """Synchronously fetch data for the current query, optionally paginated."""
-        if dformat == "parquet":
-            raise EcoPlotsError(
-                "Parquet is available via get_data(dformat='parquet'), not fetch_data_sync()."
-            )
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        line_iter = self.iter_fetch_data_lines_sync(
-            page_number=page_number,
-            page_size=page_size,
-            dformat=dformat,
-            **extras,
-        )
-        if dformat == "csv":
-            buffer = bytearray()
-            for line in line_iter:
-                if buffer:
-                    buffer.extend(b"\n")
-                buffer.extend(line.encode("utf-8"))
-            return bytes(buffer)
-
-        buffer = bytearray()
-        for line in line_iter:
-            buffer.extend(line.encode("utf-8"))
-        return orjson.loads(buffer)
+    ):
+        """Submit a single data job and retrieve its complete output."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = submit_jobs(self._base_url, dformat, [payload])
+        result = job._result(preserve_strings=True)
+        return _csv_bytes(result) if dformat == "csv" else orjson.loads(result)
 
     def iter_fetch_data_lines_sync(
         self,
@@ -1394,143 +1432,72 @@ class EcoPlotsBase:
         dformat: str = "geojson",
         **extras,
     ):
-        """Synchronously yield decoded data-stream lines for the current query."""
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        payload = {
-            "query": copy.deepcopy(self._query_filters),
-            "page_number": page_number,
-            "page_size": page_size,
-        }
-
-        if extras and isinstance(payload["query"], dict):
-            payload["query"].update(extras)
-
-        if page_number and page_size:
-            payload.update({"page_number": page_number, "page_size": page_size})
-            timeout = 300
-        else:
-            del payload["page_number"]
-            del payload["page_size"]
-            timeout = 3000
-
-        with requests.post(
-            f"{self._base_url}/api/v1.0/data/stream",
-            params=[("dformat", dformat)],
-            json=payload,
-            timeout=timeout,
-            headers={"Accept": "text/event-stream"},
-            stream=True,
-        ) as resp:
-            resp.raise_for_status()
-            for line in resp.iter_lines(decode_unicode=True):
-                if line:
-                    line = line.strip()
-                    if line:
-                        yield line
-
-    def fetch_samples_data_sync(self):
-        """Synchronously fetch sample data from the samples endpoint."""
+        """Yield decoded lines from a submitted job's stream."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = submit_jobs(self._base_url, dformat, [payload])
+        deadline = job._deadline(3000, 1)
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        pending = ""
+        chunks = job._iter_content(job._jobs[0], deadline, 1, True)
         try:
-            import geopandas
-        except ImportError:
+            for chunk in chunks:
+                pending += decoder.decode(chunk)
+                while "\n" in pending:
+                    line, pending = pending.split("\n", 1)
+                    yield line.rstrip("\r")
+        finally:
+            chunks.close()
+        pending += decoder.decode(b"", final=True)
+        if pending:
+            yield pending.rstrip("\r")
+
+    def _sample_export_payload(self):
+        """Build a sample export request requiring exactly one sample type."""
+        selected = self._query_filters.get("material_sample_type", [])
+        if len(selected) != 1:
             raise EcoPlotsError(
-                "geopandas is required for fetch_samples_data_sync(). "
-                "Install it with: pip install geopandas"
+                "Exactly one material_sample_type must be selected to fetch samples."
             )
-
-        if "material_sample_type" not in self._query_filters:
-            self._display_warning(
-                "material_sample_type must be selected to fetch samples data. "
-                "Please select a material_sample_type using select()."
-            )
-            return geopandas.GeoDataFrame()
-
-        material_sample_types = self._query_filters.get("material_sample_type", [])
-        if len(material_sample_types) != 1:
-            raise EcoPlotsError(
-                f"Exactly one material_sample_type must be selected, "
-                f"got {len(material_sample_types)}"
-            )
-
-        payload = {"query": copy.deepcopy(self._query_filters), "context": "samples"}
-        has_image = bool(payload["query"].pop("has_image", False))
+        payload = {"query": copy.deepcopy(self._query_filters)}
+        has_image = payload["query"].pop("has_image", False)
         if has_image:
             payload["has_image"] = True
+        return payload
 
-        try:
-            resp = requests.post(
-                f"{self._base_url}/api/v1.0/ui/data/samples",
-                json=payload,
-                timeout=300,
-            )
-            resp.raise_for_status()
-            data = orjson.loads(resp.content)
-        except requests.HTTPError as exc:
-            status_code = exc.response.status_code if exc.response is not None else None
-            if has_image and status_code and status_code >= 500:
-                self._display_warning(
-                    "Server rejected 'has_image=true'. Retrying without has_image "
-                    "and filtering image rows client-side."
+    @staticmethod
+    def _sample_export_frame(content):
+        """Parse flat CSV samples, preserving array fields and geographic coordinates."""
+        import io
+
+        import pandas as pd
+
+        from ._utils import _to_geopandas
+
+        frame = pd.read_csv(io.BytesIO(content)) if content.strip() else pd.DataFrame()
+        for column in (
+            "parent_igsn_uris",
+            "sibling_igsn_uris",
+            "child_igsn_uris",
+            "sample_image_urls",
+        ):
+            if column in frame:
+                frame[column] = frame[column].map(
+                    lambda value: orjson.loads(value) if isinstance(value, str) else []
                 )
-                fallback_payload = {
-                    "query": copy.deepcopy(self._query_filters),
-                    "context": "samples",
-                }
-                resp = requests.post(
-                    f"{self._base_url}/api/v1.0/ui/data/samples",
-                    json=fallback_payload,
-                    timeout=300,
-                )
-                resp.raise_for_status()
-                data = orjson.loads(resp.content)
-            else:
-                raise
+        return _to_geopandas(frame)
 
-        hits = data.get("hits", {}).get("hits", [])
-
-        if has_image:
-
-            def _has_sample_images(value):
-                if not isinstance(value, list):
-                    return False
-                for item in value:
-                    if isinstance(item, str) and item.strip():
-                        return True
-                    if isinstance(item, dict):
-                        for url in item.values():
-                            if isinstance(url, str) and url.strip():
-                                return True
-                return False
-
-            hits = [
-                hit
-                for hit in hits
-                if _has_sample_images((hit.get("_source", {}) or {}).get("sample_images"))
-            ]
-
-        if not hits:
-            self._display_warning("No sample data found for the current filters.")
-            return geopandas.GeoDataFrame()
-
-        records = []
-        for hit in hits:
-            source = hit.get("_source", {})
-            if not isinstance(source, dict):
-                continue
-            cleaned = {}
-            for key, value in source.items():
-                if key in {"geopoint", "tags"} or key.startswith("region"):
-                    continue
-                if value is not None:
-                    cleaned[key] = value
-            records.append(cleaned)
-
-        gdf = geopandas.GeoDataFrame(records)
-        if not gdf.empty:
-            gdf = gdf.dropna(axis=1, how="all")
-        return gdf
+    def fetch_samples_data_sync(self):
+        """Retrieve all matching samples as CSV for the selected sample type."""
+        payload = self._sample_export_payload()
+        response = requests.post(
+            f"{self._base_url}/api/v1.0/data/samples",
+            params={"dformat": "csv"},
+            json=payload,
+            timeout=300,
+        )
+        response.raise_for_status()
+        return self._sample_export_frame(response.content)
 
     async def iter_fetch_data_lines(
         self,
@@ -1539,329 +1506,42 @@ class EcoPlotsBase:
         dformat: str = "geojson",
         **extras,
     ):
-        """Yield decoded data-stream lines for the current query.
-
-        Args:
-            page_number: Page index to request. Must be provided together with ``page_size``.
-            page_size: Number of items per page. Must be provided together with ``page_number``.
-            dformat: Stream format, either ``"geojson"`` or ``"csv"``.
-            **extras: Additional query filters to merge into the current query.
-
-        Yields:
-            Non-empty decoded response lines with surrounding whitespace removed.
-
-        Raises:
-            EcoPlotsError: If an invalid dformat is provided.
-        """
-        try:
-            import aiohttp
-        except ImportError as exc:
-            raise EcoPlotsError(
-                "Data streaming requires aiohttp. Install it with: "
-                "pip install terndata.ecoplots[async]"
-            ) from exc
-
-        if dformat not in ("geojson", "csv"):
-            raise EcoPlotsError("dformat must be one of 'geojson' or 'csv'")
-
-        payload = {
-            "query": copy.deepcopy(self._query_filters),
-            "page_number": page_number,
-            "page_size": page_size,
-        }
-
-        if extras and isinstance(payload["query"], dict):
-            payload["query"].update(extras)
-
-        if page_number and page_size:
-            payload.update({"page_number": page_number, "page_size": page_size})
-            timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
-        else:
-            del payload["page_number"]
-            del payload["page_size"]
-            timeout = aiohttp.ClientTimeout(total=3000, sock_read=3000, sock_connect=30)
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self._base_url}/api/v1.0/data/stream?dformat={dformat}",
-                json=payload,
-                timeout=timeout,
-                headers={"Accept": "text/event-stream"},
-            ) as resp:
-                resp.raise_for_status()
-
-                async for line in resp.content:
-                    line = line.decode("utf-8").strip()
-                    if line:
-                        yield line
+        """Asynchronously yield decoded lines from a submitted job's stream."""
+        self._validate_data_format(dformat)
+        payload = self._data_payload(page_number, page_size, **extras)
+        job = await async_submit_jobs(self._base_url, dformat, [payload])
+        deadline = job._deadline(3000, 1)
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        pending = ""
+        async with _aiohttp().ClientSession() as session:
+            chunks = job._iter_content(session, job._jobs[0], deadline, 1, True)
+            try:
+                async for chunk in chunks:
+                    pending += decoder.decode(chunk)
+                    while "\n" in pending:
+                        line, pending = pending.split("\n", 1)
+                        yield line.rstrip("\r")
+                pending += decoder.decode(b"", final=True)
+                if pending:
+                    yield pending.rstrip("\r")
+            finally:
+                await chunks.aclose()
 
     async def fetch_samples_data(self):
-        """Fetch sample data from the samples endpoint.
-
-        Returns data as a geopandas GeoDataFrame extracted from the _source field
-        of response hits.
-
-        Returns:
-            A geopandas GeoDataFrame with sample data.
-
-        Raises:
-            EcoPlotsError: If material_sample_type is not selected or if multiple
-                material_sample_types are selected (only one allowed).
-
-        Notes:
-            - Timeout is 300s (5 min)
-            - material_sample_type is required and must be single-valued
-            - Intended for internal use only
-        """
-        try:
-            import aiohttp
-        except ImportError as exc:
-            raise EcoPlotsError(
-                "Sample data retrieval requires aiohttp. Install it with: "
-                "pip install terndata.ecoplots[async]"
-            ) from exc
-
-        try:
-            import geopandas
-        except ImportError:
-            raise EcoPlotsError(
-                "geopandas is required for fetch_samples_data(). "
-                "Install it with: pip install geopandas"
-            )
-
-        # Check that material_sample_type is present
-        if "material_sample_type" not in self._query_filters:
-            self._display_warning(
-                "material_sample_type must be selected to fetch samples data. "
-                "Please select a material_sample_type using select()."
-            )
-            return geopandas.GeoDataFrame()
-
-        # Check that only one material_sample_type is provided
-        material_sample_types = self._query_filters.get("material_sample_type", [])
-        if len(material_sample_types) != 1:
-            raise EcoPlotsError(
-                f"Exactly one material_sample_type must be selected, "
-                f"got {len(material_sample_types)}"
-            )
-
-        payload = {"query": copy.deepcopy(self._query_filters), "context": "samples"}
-
-        has_image = bool(payload["query"].pop("has_image", False))
-
-        if has_image:
-            payload["has_image"] = True
-
+        """Retrieve all matching sample CSV asynchronously for the selected sample type."""
+        payload = self._sample_export_payload()
+        aiohttp = _aiohttp()
         timeout = aiohttp.ClientTimeout(total=300, sock_read=300, sock_connect=30)
-
         async with aiohttp.ClientSession() as session:
-            try:
-                async with session.post(
-                    f"{self._base_url}/api/v1.0/ui/data/samples",
-                    json=payload,
-                    timeout=timeout,
-                ) as resp:
-                    resp.raise_for_status()
-                    data = await resp.json()
-            except aiohttp.ClientResponseError as exc:
-                if has_image and exc.status >= 500:
-                    self._display_warning(
-                        "Server rejected 'has_image=true'. Retrying without has_image "
-                        "and filtering image rows client-side."
-                    )
-                    fallback_payload = {
-                        "query": copy.deepcopy(self._query_filters),
-                        "context": "samples",
-                    }
-                    async with session.post(
-                        f"{self._base_url}/api/v1.0/ui/data/samples",
-                        json=fallback_payload,
-                        timeout=timeout,
-                    ) as resp:
-                        resp.raise_for_status()
-                        data = await resp.json()
-                else:
-                    raise
-
-        # Extract hits from response
-        hits = data.get("hits", {}).get("hits", [])
-
-        if has_image:
-
-            def _has_sample_images(value):
-                if not isinstance(value, list):
-                    return False
-                for item in value:
-                    if isinstance(item, str) and item.strip():
-                        return True
-                    if isinstance(item, dict):
-                        for url in item.values():
-                            if isinstance(url, str) and url.strip():
-                                return True
-                return False
-
-            hits = [
-                hit
-                for hit in hits
-                if _has_sample_images((hit.get("_source", {}) or {}).get("sample_images"))
-            ]
-
-        if not hits:
-            self._display_warning("No sample data found for the current filters.")
-            return geopandas.GeoDataFrame()
-
-        def _extract_value_field(raw_value):
-            if isinstance(raw_value, list) and raw_value and isinstance(raw_value[0], dict):
-                return raw_value[0].get("value")
-            if isinstance(raw_value, dict):
-                return raw_value.get("value")
-            return None
-
-        def _extract_label_field(raw_value):
-            if isinstance(raw_value, list) and raw_value and isinstance(raw_value[0], dict):
-                candidate = raw_value[0]
-            elif isinstance(raw_value, dict):
-                candidate = raw_value
-            else:
-                return None
-
-            if "label" in candidate:
-                return candidate.get("label")
-
-            value = candidate.get("value")
-            if isinstance(value, list) and value and isinstance(value[0], dict):
-                return value[0].get("label") or value[0].get("value")
-            if isinstance(value, dict):
-                return value.get("label") or value.get("value")
-
-            current = candidate.get("current")
-            if isinstance(current, list) and current and isinstance(current[0], dict):
-                return current[0].get("label") or current[0].get("value")
-            if isinstance(current, dict):
-                return current.get("label") or current.get("value")
-
-            return None
-
-        def _resolve_vocab_value(raw_value, vocab_map):
-            if isinstance(raw_value, list):
-                resolved = [vocab_map.get(v, v) for v in raw_value if v is not None]
-                if not resolved:
-                    return None
-                return resolved[0] if len(resolved) == 1 else resolved
-            if raw_value is None:
-                return None
-            return vocab_map.get(raw_value, raw_value)
-
-        records = []
-        with Cache(CACHE_DIR) as cache:
-            dataset_map = cache.get("dataset", {}) or {}
-            feature_type_map = cache.get("feature_type", {}) or {}
-            site_visit_id_map = cache.get("site_visit_id", {}) or {}
-            used_procedure_map = cache.get("used_procedure", {}) or {}
-
-            dropped_fields = {
-                "dataset_attr_count",
-                "direct_site_id",
-                "geographic_information",
-                "observed_property",
-                "obsverved_property",
-                "related_samples",
-                "sample_attr_count",
-                "sample_information",
-                "site_attr_count",
-                "sites_hierarchy",
-                "site_hierarchy",
-                "site_hirarchy",
-                "site_visit_attr_count",
-            }
-
-            for hit in hits:
-                source = hit.get("_source", {})
-                if not isinstance(source, dict):
-                    continue
-
-                cleaned = {}
-
-                for key, value in source.items():
-                    # Drop explicit fields and region* columns
-                    if key in {"geopoint", "tags"} or key.startswith("region"):
-                        continue
-
-                    if key in dropped_fields:
-                        continue
-
-                    # Flatten and rename igsn_information -> igsn
-                    if key == "igsn_information":
-                        igsn_val = None
-                        if isinstance(value, list) and value and isinstance(value[0], dict):
-                            nested_value = value[0].get("value")
-                            if isinstance(nested_value, dict):
-                                igsn_val = nested_value.get("label")
-                        if igsn_val is not None:
-                            cleaned["igsn"] = igsn_val
-                        continue
-
-                    # Flatten and rename visit_start_date -> visit_date
-                    if key == "visit_start_date":
-                        visit_date = _extract_value_field(value)
-                        if visit_date is not None:
-                            cleaned["visit_date"] = visit_date
-                        continue
-
-                    # Resolve used_procedure labels from cache
-                    if key == "used_procedure":
-                        resolved_used_procedure = _resolve_vocab_value(value, used_procedure_map)
-                        if resolved_used_procedure is not None:
-                            cleaned["used_procedure"] = resolved_used_procedure
-                        continue
-
-                    if key == "dataset":
-                        resolved_dataset = _resolve_vocab_value(value, dataset_map)
-                        if resolved_dataset is not None:
-                            cleaned["dataset"] = resolved_dataset
-                        continue
-
-                    if key == "feature_type":
-                        resolved_feature_type = _resolve_vocab_value(value, feature_type_map)
-                        if resolved_feature_type is not None:
-                            cleaned["feature_type"] = resolved_feature_type
-                        continue
-
-                    if key == "site_visit_id":
-                        resolved_site_visit_id = _resolve_vocab_value(value, site_visit_id_map)
-                        if resolved_site_visit_id is not None:
-                            cleaned["site_visit_id"] = resolved_site_visit_id
-                        continue
-
-                    if key == "material_sample_type":
-                        resolved_material_sample_type = _resolve_vocab_value(
-                            value, MATERIAL_SAMPLE_TYPE_MAP
-                        )
-                        if resolved_material_sample_type is not None:
-                            cleaned["material_sample_type"] = resolved_material_sample_type
-                        continue
-
-                    # Remove all null-valued fields
-                    if value is not None:
-                        cleaned[key] = value
-
-                records.append(cleaned)
-
-        # Convert list of records to GeoDataFrame
-        gdf = geopandas.GeoDataFrame(records)
-
-        # Drop columns that are entirely null after normalization
-        if not gdf.empty:
-            gdf = gdf.dropna(axis=1, how="all")
-
-            if "sample_images" in gdf.columns:
-                has_any_sample_image = (
-                    gdf["sample_images"].apply(lambda v: isinstance(v, list) and len(v) > 0).any()
-                )
-                if not has_any_sample_image:
-                    gdf = gdf.drop(columns=["sample_images"])
-
-        return gdf
+            async with session.post(
+                f"{self._base_url}/api/v1.0/data/samples",
+                params={"dformat": "csv"},
+                json=payload,
+                timeout=timeout,
+            ) as response:
+                response.raise_for_status()
+                content = await response.read()
+        return await asyncio.to_thread(self._sample_export_frame, content)
 
     def discover_attributes(
         self,
@@ -2015,9 +1695,9 @@ class EcoPlotsBase:
             # Atomic replace
             target.replace(target) if target.exists() else None
             tmp_path.replace(target)
-        except Exception as e:
+        except Exception:
             tmp_path.unlink(missing_ok=True)
-            raise e
+            raise
         finally:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
@@ -2053,7 +1733,7 @@ class EcoPlotsBase:
             ver = struct.unpack(">B", f.read(1))[0]
             if ver != PROJECT_FILE_VERSION:
                 raise EcoPlotsError(
-                    f"Incompatible project version: {ver} " f"(expected {PROJECT_FILE_VERSION})."
+                    f"Incompatible project version: {ver} (expected {PROJECT_FILE_VERSION})."
                 )
             sha = f.read(32)
             n = struct.unpack(">Q", f.read(8))[0]
@@ -2200,9 +1880,17 @@ class EcoPlotsBase:
                 facet, urls, matched, unmatched, corrected = future.result()
 
                 # Convert to set for updating
-                existing = set(query_filters.get(facet, []))
-                existing.update(urls)
-                query_filters[facet] = list(existing)
+                if facet in EQUIPMENT_FACETS:
+                    group, child, _ = EQUIPMENT_FACETS[facet]
+                    children = query_filters.setdefault(group, {})
+                    existing = set(children.get(child, []))
+                    existing.update(urls)
+                    children[child] = sorted(existing)
+                else:
+                    api_facet = FACET_API_NAMES.get(facet, facet)
+                    existing = set(query_filters.get(api_facet, []))
+                    existing.update(urls)
+                    query_filters[api_facet] = list(existing)
 
                 all_matched.setdefault(facet, [])
                 # ensure corrected values are excluded

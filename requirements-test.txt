@@ -1,3 +1,5 @@
+-r requirements-async.txt
 pytest
+rispy
 pytest-cov
 pytest-assert-utils
