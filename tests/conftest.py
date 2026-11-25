@@ -7,6 +7,13 @@ import orjson
 import pytest
 
 from terndata.ecoplots._base import EcoPlotsBase
+from terndata.ecoplots._vocab_cache import wait_for_vocabularies
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _vocab_startup():
+    """Finish the startup check before individual tests replace HTTP transports."""
+    wait_for_vocabularies()
 
 
 @pytest.fixture
