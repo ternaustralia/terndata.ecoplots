@@ -1012,6 +1012,28 @@ class EcoPlotsBase:
 
         return self._query_filters
 
+    def _discovery_region_type(self, region_type: Optional[str] = None) -> str:
+        """Resolve an explicit region type or the single currently selected type."""
+        if not region_type:
+            selected = self._filters.get("region_type") or self._query_filters.get("region_type")
+            if isinstance(selected, str):
+                selected = [selected]
+            if not selected:
+                raise EcoPlotsError(
+                    "region_type is required when discovering regions; select a region type "
+                    "first or pass region_type explicitly."
+                )
+            if len(selected) != 1:
+                raise EcoPlotsError(
+                    "Multiple region types are selected; pass region_type explicitly "
+                    "when discovering regions."
+                )
+            region_type = selected[0]
+        resolved = resolve_region_type(region_type)
+        if not resolved:
+            raise EcoPlotsError(f"Could not resolve region_type: {region_type}")
+        return resolved
+
     def discover(
         self,
         discovery_facet: str,
@@ -1023,7 +1045,8 @@ class EcoPlotsBase:
 
         Args:
             discovery_facet: Facet to discover (must resolve via configured discovery facets).
-            region_type: Optional region type used when discovering regions.
+            region_type: Region type used when discovering regions. Defaults to
+                the single currently selected region type.
             include_region: If True while discovering sites, request site region
                 metadata from the API using ``include-regions=True``.
             query_filters: Optional query filters to use for this request instead
@@ -1051,11 +1074,10 @@ class EcoPlotsBase:
             )
 
         params = []
-        if facet_param == "region" and region_type:
-            region_type_val = resolve_region_type(region_type)
-            if region_type_val:
-                api_region_type = region_type_val.removeprefix("IBRA7 ").lower().replace(" ", "-")
-                params.append(("region_type", api_region_type))
+        if facet_param == "region":
+            region_type_val = self._discovery_region_type(region_type)
+            api_region_type = region_type_val.lower().replace(" ", "-")
+            params.append(("region_type", api_region_type))
         if facet_param == "site_id" and include_region:
             params.append(("include-regions", "True"))
 
@@ -1087,8 +1109,8 @@ class EcoPlotsBase:
 
         Args:
             discovery_facet: Facet to discover (must resolve via SAMPLE_DISCOVERY_FACETS).
-            region_type: Optional region type used when discovering regions.
-                Required when discovery_facet is "region".
+            region_type: Region type used when discovering regions. Defaults to
+                the single currently selected region type.
 
         Returns:
             Parsed JSON payload returned by the discovery endpoint.
@@ -1135,8 +1157,7 @@ class EcoPlotsBase:
 
         # When discovering regions, resolve region_type from args and add to query
         if discovery_facet == "region":
-            if not region_type:
-                raise EcoPlotsError("region_type is required when discovering regions")
+            region_type = self._discovery_region_type(region_type)
             facet, urls, matched, unmatched, corrected = validate_facet(
                 "region_type", [region_type]
             )

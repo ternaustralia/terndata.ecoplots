@@ -3,6 +3,14 @@ Change Log
 
 Changes over time for the EcoPlots Python library.
 
+v1.2.1 (2026-11-27)
+-------------------
+
+- Fixed ``get_regions()`` and ``discover("region")`` to reuse a single selected
+  region type.
+- Fixed region discovery requests.
+- Added region type and region controls to the notebook spatial selector.
+
 v1.2.0 (2026-11-25)
 -------------------
 

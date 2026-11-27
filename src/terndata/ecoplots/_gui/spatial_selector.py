@@ -2,8 +2,8 @@
 
 This module provides a Jupyter/ipywidgets-based map control that lets a user draw a
 rectangle or polygon and then preview/confirm a WKT spatial filter that is passed to
-`ecoplots.select(spatial=<WKT>)`. It embeds TERN/EcoPlots branding and keeps the map
-bounded to Australia.
+`ecoplots.select(spatial=<WKT>)`. It embeds TERN/EcoPlots branding and initially
+centres the map on Australia, with unrestricted navigation.
 """
 
 from __future__ import annotations
@@ -11,8 +11,10 @@ from __future__ import annotations
 import base64
 import importlib.resources as ir
 from contextlib import suppress
+from html import escape
 from typing import Any, Optional
 
+import orjson
 from defusedxml import ElementTree as ET
 from ipyleaflet import (
     AttributionControl,
@@ -30,18 +32,10 @@ from ipywidgets import HTML, Button, Checkbox, HBox, Layout, Output, VBox
 from requests.exceptions import RequestException
 from shapely.geometry import box as shp_box
 from shapely.geometry import shape as shp_shape
-from traitlets import Float, List
 
 from .._exceptions import EcoPlotsError
-
-_AU_BOUNDS = [[-44.0, 112.0], [-10.0, 154.0]]  # [[south, west], [north, east]]
-
-
-class _AustraliaMap(Map):
-    """Expose Leaflet's pan limits as synchronized map options."""
-
-    max_bounds = List(default_value=_AU_BOUNDS).tag(sync=True, o=True)
-    max_bounds_viscosity = Float(1.0).tag(sync=True, o=True)
+from ._map_view import _set_map_bounds
+from ._regions import _RegionSelector
 
 
 def _extract_geometry(geo_json: dict[str, Any]) -> Optional[dict[str, Any]]:
@@ -115,11 +109,11 @@ def spatial_selector(
 ) -> VBox:
     """Create a Jupyter widget to select a spatial filter and apply it via `select()`.
 
-    Workflow:
-      1) Draw rectangle or polygon on the map
-      2) Click **Preview** to print the WKT `POLYGON(...)`
-      3) Click **Confirm** to call `ecoplots.select(spatial=<WKT>)`
-      4) **Clear** resets selection and zooms back to Australia
+    Choose a region type to show its divisions, then choose a region to shade
+    and zoom to it. Alternatively, draw a rectangle or polygon. The site overlay
+    previews the selection. **Confirm** applies the staged filters; **Clear**
+    resets the map controls and returns to the initial view. Map navigation is
+    unrestricted; selection zoom uses standard widget updates without fly-to.
 
     Args:
         ecoplots: EcoPlots instance to update upon Confirm.
@@ -133,8 +127,6 @@ def spatial_selector(
     basemap = basemap_to_tiles(
         basemaps.Esri.WorldGrayCanvas,
         max_native_zoom=16,
-        no_wrap=True,
-        bounds=_AU_BOUNDS,
     )
     basemap.max_zoom = 18
     basemap.attribution = (
@@ -142,20 +134,25 @@ def spatial_selector(
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
         "contributors, GIS user community"
     )
-    m = _AustraliaMap(
+    m = Map(
         center=center,
-        zoom=max(4, min(zoom, 18)),
-        min_zoom=4,
+        zoom=max(1, min(zoom, 18)),
+        min_zoom=1,
         max_zoom=18,
         basemap=basemap,
         scroll_wheel_zoom=True,
         bounce_at_zoom_limits=False,
         attribution_control=False,
+        panes={
+            "ecop-region-types": {"zIndex": 300, "pointerEvents": "none"},
+            "ecop-regions": {"zIndex": 350, "pointerEvents": "none"},
+            "ecop-clusters": {"zIndex": 450, "pointerEvents": "none"},
+            "ecop-sites": {"zIndex": 460},
+        },
     )
     m.add(AttributionControl(prefix="", position="bottomleft"))
     m.add_class("ecop-spatial-map")
     m.layout = Layout(width="100%", height="500px")
-    m.fit_bounds(_AU_BOUNDS)
 
     # DrawControl: enable rectangle + polygon
     draw = DrawControl(
@@ -281,8 +278,8 @@ def spatial_selector(
         b.add_class(cls)
 
     status = HTML(
-        value="<b>Draw a shape:</b> Use rectangle or polygon. "
-        "Overlay updates automatically. Click <b>Confirm</b> to apply spatial filter."
+        value="<b>Select a region or draw a shape.</b> "
+        "Overlay updates automatically. Click <b>Confirm</b> to apply filters."
     )
     out = Output(layout={"border": "1px solid #e5e5e5", "max_height": "220px", "overflow": "auto"})
 
@@ -291,6 +288,12 @@ def spatial_selector(
     overlay_heatmap: Optional[Heatmap] = None
     overlay_sites_group: Optional[LayerGroup] = None
     selection_site_count: int = 0  # Track last counted sites for confirmation feedback
+    region_selector: Optional[_RegionSelector] = None
+    preview_cache: dict[bytes, dict] = {}
+    site_popup: Optional[Popup] = None
+
+    def _preview_client():
+        return region_selector.preview_client() if region_selector is not None else ecoplots
 
     @draw.on_draw
     def _on_draw(_self, action, geo_json):  # noqa: ARG001 (callback signature)
@@ -305,66 +308,14 @@ def spatial_selector(
         """
 
         nonlocal drawn_geom
-        nonlocal selection_site_count
         drawn_geom = _extract_geometry(geo_json)
 
         # Zoom to selection
         if drawn_geom:
             g = shp_shape(drawn_geom)
             minx, miny, maxx, maxy = g.bounds
-            m.fit_bounds([[miny, minx], [maxy, maxx]])
-
-            # Fetch clusters/sites within the drawn bounds
-            try:
-                # Pass geometry directly
-                # Format: {"type": "Polygon", "coordinates": [...]}
-                geojson_geom = drawn_geom
-
-                # Fetch clusters for this specific geometry
-                fetch_fn = getattr(ecoplots, "_fetch_clusters", None)
-
-                if callable(fetch_fn):
-                    selection_data = fetch_fn(geojson_geom)
-
-                    # Count total sites in selection
-                    total_sites = 0
-                    clusters = selection_data.get("clusters", []) or []
-                    sites = selection_data.get("sites", []) or []
-
-                    if sites:
-                        total_sites = len(sites)
-                    elif clusters:
-                        try:
-                            total_sites = sum(int(c.get("num_sites", 0)) for c in clusters)
-                        except (TypeError, ValueError, OverflowError):
-                            total_sites = len(clusters)
-
-                    selection_site_count = total_sites
-                    status.value = (
-                        f"<b>{total_sites} {'site' if total_sites == 1 else 'sites'} in selection. </b>"
-                        f"Click <b>Confirm</b> to apply spatial filter or <b>Clear</b> to reset."
-                    )
-                    # Auto-render overlay after drawing
-                    _preview()
-                else:
-                    status.value = (
-                        "<b>Shape captured.</b> Click <b>Confirm</b> to apply spatial filter "
-                        "or <b>Clear</b>."
-                    )
-            except (
-                EcoPlotsError,
-                RequestException,
-                AttributeError,
-                TypeError,
-                ValueError,
-                RuntimeError,
-            ) as e:
-                # If fetch fails, show basic message
-                status.value = (
-                    f"<b>Shape captured.</b> Click <b>Confirm</b> to apply spatial filter. ({e})"
-                )
-        else:
-            status.value = "<b>Shape captured.</b> Click <b>Confirm</b> to apply spatial filter."
+            _set_map_bounds(m, [[miny, minx], [maxy, maxx]])
+        _preview()
 
     def _current_wkt() -> Optional[str]:
         """Return WKT for the currently drawn geometry.
@@ -397,6 +348,12 @@ def spatial_selector(
         """
         nonlocal overlay_heatmap
         nonlocal overlay_sites_group
+        nonlocal selection_site_count, site_popup
+        selection_site_count = 0
+        if site_popup is not None:
+            if site_popup in m.layers:
+                m.remove(site_popup)
+            site_popup = None
 
         wkt = _current_wkt()
         with out:
@@ -422,24 +379,36 @@ def spatial_selector(
         if overlay_heatmap is not None:
             with suppress(Exception):
                 m.remove_layer(overlay_heatmap)
+        overlay_heatmap = None
         if overlay_sites_group is not None:
             with suppress(Exception):
                 m.remove_layer(overlay_sites_group)
+        overlay_sites_group = None
 
         # Fetch cluster/sites preview data from client, if available
         preview_data: Optional[dict[str, Any]] = None
         try:
             # Support both names: _fetch_clusters (preferred) and _fetch_cluster (legacy)
-            fetch_fn = getattr(ecoplots, "_fetch_clusters", None)
+            preview_client = _preview_client()
+            fetch_fn = getattr(preview_client, "_fetch_clusters", None)
             if not callable(fetch_fn):
-                fetch_fn = getattr(ecoplots, "_fetch_cluster", None)
+                fetch_fn = getattr(preview_client, "_fetch_cluster", None)
             if callable(fetch_fn):
-                # If we have a drawn geometry, fetch for that specific area
-                # Otherwise fetch based on current filters
-                if drawn_geom:
-                    preview_data = fetch_fn(drawn_geom)
-                else:
-                    preview_data = fetch_fn()
+                key = orjson.dumps(
+                    [
+                        getattr(preview_client, "_base_url", None),
+                        getattr(preview_client, "_mode", None),
+                        getattr(preview_client, "_query_filters", {}),
+                        drawn_geom,
+                    ],
+                    option=orjson.OPT_SORT_KEYS,
+                )
+                if key not in preview_cache:
+                    data = fetch_fn(drawn_geom) if drawn_geom else fetch_fn()
+                    if len(preview_cache) >= 8:
+                        preview_cache.pop(next(iter(preview_cache)))
+                    preview_cache[key] = data
+                preview_data = preview_cache[key]
             else:
                 with out:
                     out.append_stdout(
@@ -460,6 +429,14 @@ def spatial_selector(
         if preview_data:
             clusters = preview_data.get("clusters", []) or []
             sites = preview_data.get("sites", []) or []
+            try:
+                selection_site_count = (
+                    len(sites)
+                    if sites
+                    else sum(int(cluster.get("num_sites", 0)) for cluster in clusters)
+                )
+            except (TypeError, ValueError, OverflowError):
+                selection_site_count = len(clusters)
 
             # Helper to parse site title from URI
             def _site_label(site_uri: str) -> str:
@@ -471,7 +448,6 @@ def spatial_selector(
             if sites and len(sites) < 250:
                 # Render sites as dark green dots with popup on hover/click
                 markers: list[CircleMarker] = []
-                shadows: list[CircleMarker] = []
                 for s in sites:
                     try:
                         lat = float(s.get("latitude"))
@@ -479,18 +455,9 @@ def spatial_selector(
                     except (TypeError, ValueError, OverflowError):
                         continue
                     label = _site_label(s.get("site_id", "site"))
-                    # Shadow circle (slightly larger, low opacity) to distinguish close sites
-                    shadow = CircleMarker(
-                        location=(lat, lon),
-                        radius=7,
-                        color="#000000",
-                        opacity=0.25,
-                        fill=True,
-                        fill_color="#000000",
-                        fill_opacity=0.25,
-                    )
                     # Main circle
                     cm = CircleMarker(
+                        pane="ecop-sites",
                         location=(lat, lon),
                         radius=5,
                         color="#043e4f",
@@ -498,18 +465,21 @@ def spatial_selector(
                         fill_color="#043e4f",
                         fill_opacity=0.85,
                     )
-                    # Attach a popup (opens on click). ipyleaflet tooltips are limited.
-                    popup = Popup(location=(lat, lon), child=HTML(value=label))
 
-                    def _bind_popup(marker: CircleMarker, p: Popup) -> None:
-                        # On click, show popup near marker
+                    def _bind_popup(marker: CircleMarker, title: str) -> None:
+                        # Build only the popup the user actually opens.
                         def _on_click(**_kwargs):
-                            with suppress(Exception):
-                                m.add_layer(p)
+                            nonlocal site_popup
+                            if site_popup is not None and site_popup in m.layers:
+                                m.remove(site_popup)
+                            site_popup = Popup(
+                                location=marker.location, child=HTML(value=escape(title))
+                            )
+                            m.add(site_popup)
 
                         marker.on_click(_on_click)
 
-                    _bind_popup(cm, popup)
+                    _bind_popup(cm, label)
 
                     # Hover interactions: make marker appear to "come up"
                     def _on_mouseover(*, marker=cm, **_kwargs):
@@ -528,11 +498,9 @@ def spatial_selector(
                         cm.on_mouseover(_on_mouseover)
                         cm.on_mouseout(_on_mouseout)
 
-                    shadows.append(shadow)
                     markers.append(cm)
 
-                # Add shadows first so markers render above them
-                overlay_sites_group = LayerGroup(layers=shadows + markers)
+                overlay_sites_group = LayerGroup(layers=markers)
                 if overlay_checkbox.value:
                     m.add_layer(overlay_sites_group)
                 status.value = (
@@ -564,8 +532,10 @@ def spatial_selector(
 
                 if pts:
                     overlay_heatmap = Heatmap(
-                        locations=pts,
-                        weights=weights,
+                        pane="ecop-clusters",
+                        locations=[
+                            (*point, weight) for point, weight in zip(pts, weights, strict=True)
+                        ],
                         radius=25,
                         blur=15,
                         min_opacity=0.3,
@@ -616,10 +586,28 @@ def spatial_selector(
             _btn: The button instance triggering the callback (unused).
         """
         wkt = _current_wkt()
+        if region_selector is not None and region_selector.region_type.value:
+            try:
+                region_selector.apply(wkt)
+                label = (
+                    region_selector.region.label
+                    if region_selector.region.value
+                    else region_selector.region_type.label
+                )
+                status.value = f"<b>✅ Filters applied:</b> {escape(label)}."
+                out.clear_output()
+                out.append_stdout(f"Region filters applied: {label}\n")
+            except (
+                EcoPlotsError,
+                RequestException,
+                AttributeError,
+                ValueError,
+                RuntimeError,
+            ) as exc:
+                status.value = f"<b>Could not apply region filters:</b> {escape(str(exc))}"
+            return
         if not wkt:
-            status.value = (
-                "<b>⚠️ No geometry selected.</b> Draw a shape first; overlay updates automatically."
-            )
+            status.value = "<b>⚠️ No selection.</b> Select a region type or draw a shape first."
             return
 
         # Store current spatial filter state before applying
@@ -676,7 +664,7 @@ def spatial_selector(
                     out.append_stdout(f"ecoplots.select(spatial='{wkt}')\n")
                     out.append_stdout("─" * 60 + "\n")
 
-        except (AttributeError, ValueError, RuntimeError) as e:
+        except (EcoPlotsError, RequestException, AttributeError, ValueError, RuntimeError) as e:
             status.value = f"<b>❌ Error:</b> {type(e).__name__}: {e}"
             with out:
                 out.clear_output()
@@ -691,6 +679,8 @@ def spatial_selector(
         nonlocal drawn_geom
         nonlocal overlay_heatmap
         nonlocal overlay_sites_group
+        if region_selector is not None:
+            region_selector.clear()
         draw.clear()
         drawn_geom = None
         out.clear_output()
@@ -704,7 +694,9 @@ def spatial_selector(
                 m.remove_layer(overlay_sites_group)
             overlay_sites_group = None
         # Reset view to full Australia bounds
-        m.fit_bounds(_AU_BOUNDS)
+        with m.hold_sync():
+            m.center = center
+            m.zoom = max(1, min(zoom, 18))
         status.value = (
             "<b>Selection cleared.</b> Draw a new shape; overlay will auto-update. "
             "Click <b>Confirm</b> to apply."
@@ -778,11 +770,27 @@ def spatial_selector(
     # fmt: on
     out.add_class("ecop-output")
 
-    # Render initial preview immediately on widget load (based on current filters)
-    with suppress(Exception):
-        # Ensure map starts at full Australia bounds before initial preview
-        m.fit_bounds(_AU_BOUNDS)
+    def _region_changed():
+        nonlocal drawn_geom, selection_site_count
+        draw.clear()
+        drawn_geom = None
+        selection_site_count = 0
         _preview()
 
+    if callable(getattr(ecoplots, "get_regions", None)):
+        region_selector = _RegionSelector(ecoplots, m, _region_changed)
+
+    if region_selector is not None:
+        try:
+            region_selector.restore_selection()
+        except (EcoPlotsError, RequestException, KeyError, TypeError, ValueError) as exc:
+            region_selector.message.value = (
+                f"Could not restore region selection: {escape(str(exc))}"
+            )
+
+    # Restore first so only the final selection triggers an initial data request.
+    _preview()
+
     # Stack everything: CSS, map, buttons (with overlay toggle + opacity), status, preview output
-    return VBox([css, css_overlay, output_css, m, controls, status, out])
+    region_controls = [region_selector.widget] if region_selector is not None else []
+    return VBox([css, css_overlay, output_css, *region_controls, m, controls, status, out])
