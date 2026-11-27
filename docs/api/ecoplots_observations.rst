@@ -298,6 +298,11 @@ Regions
    # Step 2: list regions within a type
    ec.get_regions("bioregions")
 
+   # Or reuse the currently selected region type
+   ec.select(region_type="IBRA7 Bioregions")
+   ec.get_regions()
+   ec.discover("region")  # same selected-type behavior
+
 Feature Types & Observed Properties
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

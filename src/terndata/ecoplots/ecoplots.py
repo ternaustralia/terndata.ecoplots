@@ -392,8 +392,8 @@ class EcoPlots(EcoPlotsBase):
         Args:
             facet: Discovery facet or common alias, for example ``"dataset"``,
                 ``"site_id"``, ``"region"``, or ``"feature_type"``.
-            **kwargs: Extra arguments required by specific facets. ``region``
-                discovery requires ``region_type``.
+            **kwargs: Extra arguments for specific facets. ``region`` discovery
+                uses ``region_type`` or the single currently selected region type.
 
         Returns:
             A pandas DataFrame containing discovered values.
@@ -461,10 +461,7 @@ class EcoPlots(EcoPlotsBase):
 
         method = getattr(self, method_name)
         if method_name == "get_regions":
-            region_type = kwargs.get("region_type")
-            if not region_type:
-                raise EcoPlotsError("region_type is required when discovering regions")
-            return method(region_type=region_type)
+            return method(region_type=kwargs.get("region_type"))
         if method_name == "get_sites":
             return method(include_region=kwargs.get("include_region", False))
         return method()
@@ -775,17 +772,19 @@ class EcoPlots(EcoPlotsBase):
             data = super().discover("region_type")
         return pd.DataFrame(data)
 
-    def get_regions(self, region_type: str) -> pd.DataFrame:
+    def get_regions(self, region_type: Optional[str] = None) -> pd.DataFrame:
         """Get the available regions for a specific region type from the applied filters.
 
         Args:
-            region_type: The region type to retrieve regions for.
+            region_type: The region type to retrieve regions for. Defaults to the
+                single currently selected region type. Accepts a label, API slug,
+                or region type URI. Pass explicitly if no type or multiple types
+                are currently selected.
 
         Returns:
             A DataFrame containing the regions for the specified region type.
         """
         if self._mode == "samples":
-            # For samples, we have a fixed region type of "plot", so we ignore the input and use "plot"
             data = super().discover_samples("region", region_type=region_type)
         else:
             data = super().discover("region", region_type=region_type)
@@ -1211,8 +1210,9 @@ class EcoPlots(EcoPlotsBase):
     def select_spatial(self, **kwargs):
         """Open the spatial selection widget.
 
-        A minimal map based spatial selector, similar to spatial selection tool in
-        EcoPlots Portal.
+        Select a region type to show its divisions and a region to shade and
+        zoom to it, or draw a polygon. Click Confirm to apply the selection.
+        Uses the same GeoServer region layers as the EcoPlots Portal.
 
         Args:
             **kwargs: Additional keyword arguments to pass to the widget.

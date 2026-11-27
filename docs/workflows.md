@@ -149,6 +149,15 @@ ec.get_site_attributes_data()
 ec.get_site_visit_attributes_data()
 ```
 
+After selecting exactly one region type, you can omit it from region discovery
+in either observations or samples mode:
+
+```python
+ec.select(region_type="IBRA7 Bioregions")
+ec.get_regions()
+ec.discover("region")  # equivalent dispatcher
+```
+
 ### Preview & Summary
 
 ```python
@@ -216,8 +225,23 @@ accept `timeout` and `poll_interval` in seconds.
 
 ```python
 widget = ec.select_spatial()    # interactive map — run in a notebook cell
-# After drawing a shape, call ec.get_filter("spatial") to retrieve the WKT
+# Choose a region type to show its divisions, then a region to shade and zoom to it.
+# Or draw a shape. Click Confirm to apply the selection.
+# After confirming a drawn shape, ec.get_filter("spatial") returns its WKT.
 ```
+
+Region controls use the same GeoServer layers as the EcoPlots portal: WMS tiles
+show all divisions, and WFS supplies the selected region's polygon boundary.
+Cluster heatmaps and site markers stay above both region layers. Selecting a
+region or drawing a shape uses a simple view update; Clear restores the initial
+view. The map initially centres on Australia and allows unrestricted navigation.
+It uses standard ipyleaflet widgets, without a custom JavaScript animation bridge.
+Repeated selections reuse bounded, per-widget preview and boundary caches.
+Display boundaries are simplified; filtering still uses the canonical region URI.
+The map opens with your current single region selection. Changing the region
+type clears the previous region in the map controls. Confirm replaces the
+client's region filters while preserving other filters; Clear resets the map
+preview without removing filters already applied to the client.
 
 ### Typical Observations Workflow
 

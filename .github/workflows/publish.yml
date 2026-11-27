@@ -5,13 +5,26 @@ on:
     branches:
       - main
   release:
-    types: [created]
+    types: [published]
   workflow_dispatch:
+    inputs:
+      publish_target:
+        description: Distribution to publish
+        type: choice
+        options:
+          - development
+          - release
+        default: development
+        required: true
+      release_tag:
+        description: Existing tag to publish when target is release (for example, 1.2.0)
+        type: string
+        required: false
 
 jobs:
   pypi-publish-dev:
     name: Publish dev release to PyPI
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'development')
     runs-on: ubuntu-latest
     environment:
       name: pypi-dev
@@ -47,15 +60,28 @@ jobs:
 
   pypi-publish:
     name: Publish release to PyPI
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish_target == 'release')
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/p/terndata.ecoplots
     permissions:
       id-token: write
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     steps:
+      - name: Validate release tag
+        run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Provide release_tag when manually publishing a release."
+            exit 1
+          fi
+          git check-ref-format "refs/tags/$RELEASE_TAG"
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -63,9 +89,27 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install setuptools wheel build
+          pip install setuptools wheel build packaging
       - name: Build package
         run: |
-          python -m build  # python setup.py sdist bdist_wheel
+          python -m build
+          python - <<'PYTHON'
+          import os
+          from email.parser import BytesParser
+          from pathlib import Path
+          from zipfile import ZipFile
+          from packaging.version import Version
+
+          expected = Version(os.environ["RELEASE_TAG"])
+          wheels = list(Path("dist").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit("Expected exactly one built wheel.")
+          with ZipFile(wheels[0]) as wheel:
+              metadata = next(name for name in wheel.namelist() if name.endswith(".dist-info/METADATA"))
+              actual = Version(BytesParser().parsebytes(wheel.read(metadata))["Version"])
+          if actual != expected:
+              raise SystemExit(f"Built version {actual} does not match release tag {expected}.")
+          print(f"Verified release version {actual}")
+          PYTHON
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
